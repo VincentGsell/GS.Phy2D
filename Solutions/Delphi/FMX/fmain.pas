@@ -100,7 +100,6 @@ begin
   FWorld.Clear;
   FBallCount := 0;
 
-  // Les bords du monde servent de containeur - pas besoin de boxes pour les murs
   FWorld.SetWorldBounds(W, H);
   FFrameCreated := True;
 
@@ -171,10 +170,10 @@ var
 begin
   TimerPhysics.Enabled := False;
   try
-    // Pas de simulation fixe
+    //forward !
     FWorld.Step(1.0 / 60.0);
 
-    // Calcul FPS
+    //FPS
     Inc(FFrameCount);
     ElapsedMs := FStopwatch.ElapsedMilliseconds;
     if ElapsedMs - FLastFPSUpdate >= 500 then
@@ -238,7 +237,7 @@ end;
 
 procedure TFormGSPhy.RenderWorld(Canvas: TCanvas);
 const
-  MAX_SPEED = 15.0;  // Vitesse max pour la normalisation
+  MAX_SPEED = 15.0;  // Max velocity.
 var
   I: Integer;
   P: PPhyParticle;
@@ -251,14 +250,13 @@ begin
   W := ClientWidth;
   H := ClientHeight;
 
-  // Dessiner le cadre (bords du monde) en gris
   Canvas.Fill.Color := TAlphaColorRec.Lightgray;
-  Canvas.FillRect(RectF(0, 0, W, 2), 0, 0, [], 1.0);           // Haut
-  Canvas.FillRect(RectF(0, H - 2, W, H), 0, 0, [], 1.0);       // Bas
-  Canvas.FillRect(RectF(0, 0, 2, H), 0, 0, [], 1.0);           // Gauche
-  Canvas.FillRect(RectF(W - 2, 0, W, H), 0, 0, [], 1.0);       // Droite
+  Canvas.FillRect(RectF(0, 0, W, 2), 0, 0, [], 1.0);           // up
+  Canvas.FillRect(RectF(0, H - 2, W, H), 0, 0, [], 1.0);       // down
+  Canvas.FillRect(RectF(0, 0, 2, H), 0, 0, [], 1.0);           // left
+  Canvas.FillRect(RectF(W - 2, 0, W, H), 0, 0, [], 1.0);       // right -> ;)
 
-  // Dessiner les boxes (obstacles internes)
+  // Box
   Canvas.Fill.Color := TAlphaColorRec.Gray;
   for I := 0 to FWorld.BoxCount - 1 do
   begin
@@ -267,45 +265,45 @@ begin
     Canvas.FillRect(Rect, 0, 0, [], 1.0);
   end;
 
-  // Dessiner les particules avec couleur selon l'energie
+  // Particles.
   for I := 0 to FWorld.ParticleCount - 1 do
   begin
     P := FWorld.GetParticle(I);
 
-    // Calculer la vitesse (Verlet: V = Pos - OldPos)
+    // Velocity calculus (Verlet: V = Pos - OldPos)
     VelX := P^.Pos.X - P^.OldPos.X;
     VelY := P^.Pos.Y - P^.OldPos.Y;
     Speed := Sqrt(VelX * VelX + VelY * VelY);
 
-    // Normaliser entre 0 et 1
+    // Normaliser entre 0 et 1 (?)
     SpeedNorm := Speed / MAX_SPEED;
     if SpeedNorm > 1.0 then SpeedNorm := 1.0;
 
-    // Degrade: Bleu -> Cyan -> Vert -> Jaune -> Rouge
+    // Speed vs color.
     if SpeedNorm < 0.25 then
     begin
-      // Bleu -> Cyan
+      // Blue -> Cyan
       ColorR := 0;
       ColorG := Round(SpeedNorm * 4 * 255);
       ColorB := 255;
     end
     else if SpeedNorm < 0.5 then
     begin
-      // Cyan -> Vert
+      // Cyan -> Green
       ColorR := 0;
       ColorG := 255;
       ColorB := Round((1 - (SpeedNorm - 0.25) * 4) * 255);
     end
     else if SpeedNorm < 0.75 then
     begin
-      // Vert -> Jaune
+      // Green -> Yellow
       ColorR := Round((SpeedNorm - 0.5) * 4 * 255);
       ColorG := 255;
       ColorB := 0;
     end
     else
     begin
-      // Jaune -> Rouge
+      // Yellow -> red
       ColorR := 255;
       ColorG := Round((1 - (SpeedNorm - 0.75) * 4) * 255);
       ColorB := 0;
