@@ -7,8 +7,9 @@ uses
   System.Diagnostics,
   FMX.Types, FMX.Controls, FMX.Forms, FMX.Graphics, FMX.Dialogs, FMX.SpinBox,
   FMX.Controls.Presentation, FMX.StdCtrls, FMX.Layouts,
-  GS.Phy.Vec2, GS.Phy.Types, GS.Phy.World, FMX.Edit, FMX.EditBox,
-  FMX.ActnList;
+  GS.Phy.Vec2, GS.Phy.Types, GS.Phy.World,
+  GS.Phy.Renderer, GS.Phy.Renderer.FMX,
+  FMX.Edit, FMX.EditBox, FMX.ActnList;
 
 type
   TFormGSPhy = class(TForm)
@@ -36,6 +37,7 @@ type
     procedure TrackBarRestitutionChange(Sender: TObject);
   private
     FWorld: TPhyWorld;
+    FRenderer: TPhyRendererFMX;
     FFrameCreated: Boolean;
     FStopwatch: TStopwatch;
     FFrameCount: Integer;
@@ -45,7 +47,7 @@ type
     procedure UpdateFrame;
     procedure SpawnBalls(Count: Integer);
     procedure SpawnBoxes(Count: Integer);
-    procedure RenderWorld(Canvas: TCanvas);
+    procedure RenderWorld;
   end;
 
 var
@@ -57,8 +59,8 @@ implementation
 
 const
   WALL_THICKNESS = 20;
-  BALL_RADIUS_MIN = 3;
-  BALL_RADIUS_MAX = 6;
+  BALL_RADIUS_MIN = 5;
+  BALL_RADIUS_MAX = 15;
 
 procedure TFormGSPhy.FormCreate(Sender: TObject);
 begin
@@ -70,6 +72,8 @@ begin
   FWorld.Damping := 0.99;
   FWorld.CollisionIterations := 2;
 
+  FRenderer := TPhyRendererFMX.Create;
+
   SpinBoxIterations.Value := FWorld.CollisionIterations;
 
   FStopwatch := TStopwatch.StartNew;
@@ -79,6 +83,7 @@ end;
 
 procedure TFormGSPhy.FormDestroy(Sender: TObject);
 begin
+  FRenderer.Free;
   FWorld.Free;
 end;
 
@@ -226,101 +231,59 @@ end;
 procedure TFormGSPhy.FormPaint(Sender: TObject; Canvas: TCanvas;
   const ARect: TRectF);
 begin
-  if Canvas.BeginScene then
+  FRenderer.SetCanvas(Canvas);
+  FRenderer.SetSize(ClientWidth, ClientHeight);
+  FRenderer.BeginRender;
   try
-    Canvas.Clear(TAlphaColorRec.White);
-    RenderWorld(Canvas);
+    FRenderer.Clear(TPhyColors.White);
+    RenderWorld;
   finally
-    Canvas.EndScene;
+    FRenderer.EndRender;
   end;
 end;
 
-procedure TFormGSPhy.RenderWorld(Canvas: TCanvas);
-const
-  MAX_SPEED = 15.0;  // Max velocity.
+procedure TFormGSPhy.RenderWorld;
 var
   I: Integer;
-  P: PPhyParticle;
   Box: PPhyBox;
-  Rect: TRectF;
+  PosX, PosY, OldPosX, OldPosY, Radius: Single;
+  VelX, VelY: Single;
+  ParticleColor: TPhyColor;
   W, H: Single;
-  VelX, VelY, Speed, SpeedNorm: Single;
-  ColorR, ColorG, ColorB: Byte;
 begin
-  W := ClientWidth;
-  H := ClientHeight;
+  W := FRenderer.Width;
+  H := FRenderer.Height;
 
-  Canvas.Fill.Color := TAlphaColorRec.Lightgray;
-  Canvas.FillRect(RectF(0, 0, W, 2), 0, 0, [], 1.0);           // up
-  Canvas.FillRect(RectF(0, H - 2, W, H), 0, 0, [], 1.0);       // down
-  Canvas.FillRect(RectF(0, 0, 2, H), 0, 0, [], 1.0);           // left
-  Canvas.FillRect(RectF(W - 2, 0, W, H), 0, 0, [], 1.0);       // right -> ;)
+  // Bordures du monde
+  FRenderer.FillRect(0, 0, W, 2, TPhyColors.LightGray);
+  FRenderer.FillRect(0, H - 2, W, H, TPhyColors.LightGray);
+  FRenderer.FillRect(0, 0, 2, H, TPhyColors.LightGray);
+  FRenderer.FillRect(W - 2, 0, W, H, TPhyColors.LightGray);
 
-  // Box
-  Canvas.Fill.Color := TAlphaColorRec.Gray;
+  // Boxes statiques
   for I := 0 to FWorld.BoxCount - 1 do
   begin
     Box := FWorld.GetBox(I);
-    Rect := RectF(Box^.MinX, Box^.MinY, Box^.MaxX, Box^.MaxY);
-    Canvas.FillRect(Rect, 0, 0, [], 1.0);
+    FRenderer.FillRect(Box^.MinX, Box^.MinY, Box^.MaxX, Box^.MaxY, TPhyColors.Gray);
   end;
 
-  // Particles.
+  // Particules avec couleur selon velocite
   for I := 0 to FWorld.ParticleCount - 1 do
   begin
-    P := FWorld.GetParticle(I);
+    PosX := FWorld.GetPosX(I);
+    PosY := FWorld.GetPosY(I);
+    OldPosX := FWorld.GetOldPosX(I);
+    OldPosY := FWorld.GetOldPosY(I);
+    Radius := FWorld.GetRadius(I);
 
-    // Velocity calculus (Verlet: V = Pos - OldPos)
-    VelX := P^.Pos.X - P^.OldPos.X;
-    VelY := P^.Pos.Y - P^.OldPos.Y;
-    Speed := Sqrt(VelX * VelX + VelY * VelY);
+    // Velocite Verlet: V = Pos - OldPos
+    VelX := PosX - OldPosX;
+    VelY := PosY - OldPosY;
 
-    // Normaliser entre 0 et 1 (?)
-    SpeedNorm := Speed / MAX_SPEED;
-    if SpeedNorm > 1.0 then SpeedNorm := 1.0;
+    ParticleColor := FRenderer.VelocityToColor(VelX, VelY);
 
-    // Speed vs color.
-    if SpeedNorm < 0.25 then
-    begin
-      // Blue -> Cyan
-      ColorR := 0;
-      ColorG := Round(SpeedNorm * 4 * 255);
-      ColorB := 255;
-    end
-    else if SpeedNorm < 0.5 then
-    begin
-      // Cyan -> Green
-      ColorR := 0;
-      ColorG := 255;
-      ColorB := Round((1 - (SpeedNorm - 0.25) * 4) * 255);
-    end
-    else if SpeedNorm < 0.75 then
-    begin
-      // Green -> Yellow
-      ColorR := Round((SpeedNorm - 0.5) * 4 * 255);
-      ColorG := 255;
-      ColorB := 0;
-    end
-    else
-    begin
-      // Yellow -> red
-      ColorR := 255;
-      ColorG := Round((1 - (SpeedNorm - 0.75) * 4) * 255);
-      ColorB := 0;
-    end;
-
-    Canvas.Fill.Color := TAlphaColor($FF000000 or (ColorR shl 16) or (ColorG shl 8) or ColorB);
-
-    Rect := RectF(
-      P^.Pos.X - P^.Radius,
-      P^.Pos.Y - P^.Radius,
-      P^.Pos.X + P^.Radius,
-      P^.Pos.Y + P^.Radius
-    );
-    Canvas.FillEllipse(Rect, 1.0);
-    Canvas.Stroke.Color := TAlphaColorRec.Black;
-    Canvas.Stroke.Thickness := 2;
-    Canvas.DrawEllipse(Rect, 1.0);
+    FRenderer.FillCircle(PosX, PosY, Radius, ParticleColor);
+    //FRenderer.DrawCircle(PosX, PosY, Radius, TPhyColors.Black, 2.0);
   end;
 end;
 

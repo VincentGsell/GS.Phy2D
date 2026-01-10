@@ -18,12 +18,28 @@ Avec beaucoup de particules qui interagissent, on observe des comportements éme
 
 ## Optimisations Performance
 
-### État actuel
-- ~10000 particules à 20 FPS
-- Spatial hash avec pointeurs directs
+### État actuel (après optimisations 2026-01-10)
+- ~10000 particules à **24 FPS** (était 20 FPS)
+- Structure SoA (Structure of Arrays) implémentée
+- Spatial hash avec pointeurs directs + pré-allocation
 - Intégration Verlet
+- FastInvSqrt (Quake III) pour normalisation rapide
 
-### Prochaines étapes d'optimisation
+### Optimisations testées (2026-01-10)
+
+| Optimisation | Résultat |
+|-------------|----------|
+| Directives `{$O+}` `{$R-}` `{$Q-}` | ✅ Inclus |
+| Pré-allocation buffers | ✅ Inclus |
+| FastInvSqrt | ✅ Inclus |
+| **SoA (Structure of Arrays)** | ✅ **+20% (20→24 FPS)** |
+| Multithreading TParallel.For | ❌ Perte de perfs (overhead) |
+| Multithreading chunks manuels | ❌ Perte de perfs (création threads) |
+| Sort and Sweep (SAP) | ❌ 6 FPS (trop de paires dans espace confiné) |
+
+**Conclusion** : Le SoA est le seul gain significatif. Le multithreading et SAP ne fonctionnent pas bien pour ce cas d'usage (particules denses dans un espace confiné).
+
+### Prochaines étapes d'optimisation (non testées)
 
 #### 1. SIMD (SSE/AVX) - Gain estimé: 2-4x
 Vectoriser les calculs sur 4 ou 8 particules simultanément :
@@ -96,6 +112,83 @@ Utiliser `TParallel.For` de Delphi ou threads manuels.
 4. **Multithreading Collisions** - Plus complexe mais gros gain
 
 ### Benchmark cible
-- 10000 particules @ 60 FPS (actuel: 20 FPS)
+- 10000 particules @ 60 FPS (actuel: 24 FPS)
 - 50000 particules @ 30 FPS
 - 100000 particules @ 15 FPS
+
+---
+
+## GPU Compute (piste future)
+
+Pour dépasser les limites du CPU, le GPU est la seule option réaliste pour 100k+ particules.
+
+### Options en Pascal/Delphi
+
+#### 1. Compute Shaders (OpenGL 4.3+)
+- Écrire la physique en GLSL
+- Utiliser des SSBOs (Shader Storage Buffer Objects) pour les données particules
+- Le rendu et la physique restent sur GPU = zéro transfert CPU↔GPU
+- **Avantage** : Intégré à OpenGL, pas de dépendance externe
+- **Inconvénient** : Syntaxe GLSL, débogage difficile
+
+```glsl
+// Exemple compute shader pour intégration Verlet
+#version 430
+layout(local_size_x = 256) in;
+
+layout(std430, binding = 0) buffer PosBuffer { vec2 positions[]; };
+layout(std430, binding = 1) buffer OldPosBuffer { vec2 oldPositions[]; };
+
+uniform vec2 gravity;
+uniform float dt;
+uniform float damping;
+
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    vec2 vel = (positions[i] - oldPositions[i]) * damping;
+    vec2 newPos = positions[i] + vel + gravity * dt * dt;
+    oldPositions[i] = positions[i];
+    positions[i] = newPos;
+}
+```
+
+#### 2. OpenCL
+- Plus générique (fonctionne sur AMD, NVIDIA, Intel)
+- Binding Pascal disponible (OpenCL headers)
+- **Avantage** : Portable
+- **Inconvénient** : Setup plus complexe, moins intégré au rendu
+
+#### 3. CUDA (NVIDIA seulement)
+- Meilleure performance sur cartes NVIDIA
+- Bindings Pascal existent
+- **Inconvénient** : Vendor lock-in
+
+### Architecture recommandée (Compute Shaders)
+
+```
+[CPU]                          [GPU]
+  |                              |
+  | Upload initial data ------→ | SSBO positions[]
+  |                              | SSBO oldPositions[]
+  |                              | SSBO radii[]
+  |                              |
+  | glDispatchCompute() ------→ | Compute Shader: Integrate
+  |                              | Compute Shader: BuildGrid (spatial hash)
+  |                              | Compute Shader: Collisions
+  |                              |
+  | (pas de readback!)           | Vertex Shader: Draw from SSBO
+  |                              | Fragment Shader: Color by velocity
+```
+
+**Clé** : Ne jamais transférer les données vers le CPU. Tout reste sur GPU.
+
+### Complexité de la collision sur GPU
+
+Le spatial hash sur GPU est plus complexe :
+1. Calculer la cellule de chaque particule (trivial)
+2. Compter les particules par cellule (atomic counters)
+3. Prefix sum pour calculer les offsets
+4. Remplir la grille triée
+5. Pour chaque particule, parcourir les cellules voisines
+
+Des bibliothèques existent (ex: `thrust` pour CUDA) mais pas directement en Pascal.
