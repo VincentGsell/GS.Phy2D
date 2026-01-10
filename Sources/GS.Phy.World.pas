@@ -21,6 +21,7 @@ Created by Vincent Gsell [https://github.com/VincentGsell]
 
 //History
 //20260110 - Created.
+//20260110 - SoA optimization for cache-friendly access.
 
 
 unit GS.Phy.World;
@@ -46,15 +47,33 @@ const
 type
   // Spatial hash pour boxes statiques - array fixe de pointeurs par cellule
   TBoxGridCell = record
-    Boxes: array[0..BOX_GRID_MAX_PER_CELL-1] of PPhyBox;  // Pointeurs directs - elimine l'indirection
+    Boxes: array[0..BOX_GRID_MAX_PER_CELL-1] of PPhyBox;
     Count: Integer;
+  end;
+
+  // Structure SoA pour les particules - acces cache-friendly
+  TParticleSoA = record
+    PosX: array of Single;
+    PosY: array of Single;
+    OldPosX: array of Single;
+    OldPosY: array of Single;
+    AccelX: array of Single;
+    AccelY: array of Single;
+    Radius: array of Single;
+    InvMass: array of Single;
+    Restitution: array of Single;
+    Flags: array of Byte;
   end;
 
   TPhyWorld = class
   private
-    FParticles: array of TPhyParticle;
+    // SoA pour les particules
+    FParticles: TParticleSoA;
     FParticleCount: Integer;
     FParticleCapacity: Integer;
+
+    // Pour compatibilite avec GetParticle - cache temporaire
+    FTempParticle: TPhyParticle;
 
     FBoxes: array of TPhyBox;
     FBoxCount: Integer;
@@ -69,7 +88,7 @@ type
 
     FCollisionIterations: Integer;
     FConstraintIterations: Integer;
-    FRestitution: Single;  // Coefficient de rebond global
+    FRestitution: Single;
 
     // Spatial hash pour boxes statiques
     FBoxGrid: array of TBoxGridCell;
@@ -78,14 +97,14 @@ type
     FBoxGridInvCellSize: Single;
     FBoxGridDirty: Boolean;
 
+    procedure GrowParticleArrays;
     procedure Integrate(DT: Single);
     procedure SolveCollisions;
     procedure SolveConstraints;
     procedure SolveBoxCollisions;
-    procedure CollideParticles(I, J: Integer);
-    procedure CollideParticlesPtr(P1, P2: PPhyParticle);  // Version optimisee avec pointeurs
+    procedure CollideParticlesSoA(I, J: Integer);
     procedure RebuildBoxGrid;
-    procedure CollideParticleBox(P: PPhyParticle; Box: PPhyBox);
+    procedure CollideParticleBoxSoA(I: Integer; Box: PPhyBox);
   public
     constructor Create;
     destructor Destroy; override;
@@ -101,8 +120,15 @@ type
     procedure Step(DT: Single);
     procedure Clear;
 
-    function GetParticle(Index: Integer): PPhyParticle; inline;
+    function GetParticle(Index: Integer): PPhyParticle;
     function GetBox(Index: Integer): PPhyBox; inline;
+
+    // Acces direct SoA pour le rendu (plus rapide)
+    function GetPosX(Index: Integer): Single; inline;
+    function GetPosY(Index: Integer): Single; inline;
+    function GetRadius(Index: Integer): Single; inline;
+    function GetOldPosX(Index: Integer): Single; inline;
+    function GetOldPosY(Index: Integer): Single; inline;
 
     property ParticleCount: Integer read FParticleCount;
     property BoxCount: Integer read FBoxCount;
@@ -110,7 +136,7 @@ type
     property CollisionIterations: Integer read FCollisionIterations write FCollisionIterations;
     property ConstraintIterations: Integer read FConstraintIterations write FConstraintIterations;
     property Damping: Single read FDamping write FDamping;
-    property Restitution: Single read FRestitution write FRestitution;  // Coefficient de rebond (0=mou, 1=elastique)
+    property Restitution: Single read FRestitution write FRestitution;
   end;
 
 implementation
@@ -118,12 +144,38 @@ implementation
 const
   INITIAL_CAPACITY = 256;
 
+procedure TPhyWorld.GrowParticleArrays;
+begin
+  FParticleCapacity := FParticleCapacity * 2;
+  SetLength(FParticles.PosX, FParticleCapacity);
+  SetLength(FParticles.PosY, FParticleCapacity);
+  SetLength(FParticles.OldPosX, FParticleCapacity);
+  SetLength(FParticles.OldPosY, FParticleCapacity);
+  SetLength(FParticles.AccelX, FParticleCapacity);
+  SetLength(FParticles.AccelY, FParticleCapacity);
+  SetLength(FParticles.Radius, FParticleCapacity);
+  SetLength(FParticles.InvMass, FParticleCapacity);
+  SetLength(FParticles.Restitution, FParticleCapacity);
+  SetLength(FParticles.Flags, FParticleCapacity);
+end;
+
 constructor TPhyWorld.Create;
 begin
   inherited;
   FParticleCount := 0;
   FParticleCapacity := INITIAL_CAPACITY;
-  SetLength(FParticles, FParticleCapacity);
+
+  // Allouer les tableaux SoA
+  SetLength(FParticles.PosX, FParticleCapacity);
+  SetLength(FParticles.PosY, FParticleCapacity);
+  SetLength(FParticles.OldPosX, FParticleCapacity);
+  SetLength(FParticles.OldPosY, FParticleCapacity);
+  SetLength(FParticles.AccelX, FParticleCapacity);
+  SetLength(FParticles.AccelY, FParticleCapacity);
+  SetLength(FParticles.Radius, FParticleCapacity);
+  SetLength(FParticles.InvMass, FParticleCapacity);
+  SetLength(FParticles.Restitution, FParticleCapacity);
+  SetLength(FParticles.Flags, FParticleCapacity);
 
   FBoxCount := 0;
   SetLength(FBoxes, 16);
@@ -132,18 +184,17 @@ begin
   SetLength(FConstraints, 64);
 
   FSpatialHash := TPhySpatialHash.Create;
-  FGravity := Vec2(0, 500); // Gravite par defaut
+  FGravity := Vec2(0, 500);
   FDamping := 0.99;
   FWorldWidth := 800;
   FWorldHeight := 600;
 
   FCollisionIterations := 2;
   FConstraintIterations := 1;
-  FRestitution := 0.3;  // 30% de rebond par defaut (perte de 70% d'energie)
+  FRestitution := 0.3;
 
   FSpatialHash.Setup(FWorldWidth, FWorldHeight, 32);
 
-  // Box grid - cellule de 32 pixels
   FBoxGridCellSize := 32;
   FBoxGridInvCellSize := 1 / FBoxGridCellSize;
   FBoxGridWidth := 0;
@@ -165,15 +216,12 @@ begin
   FWorldWidth := Width;
   FWorldHeight := Height;
 
-  // Trouver le rayon max pour la taille de cellule
   MaxRadius := 10;
   for I := 0 to FParticleCount - 1 do
-    if FParticles[I].Radius > MaxRadius then
-      MaxRadius := FParticles[I].Radius;
+    if FParticles.Radius[I] > MaxRadius then
+      MaxRadius := FParticles.Radius[I];
 
   FSpatialHash.Setup(Width, Height, MaxRadius * 2);
-
-  // Reconfigurer le box grid
   FBoxGridDirty := True;
 end;
 
@@ -184,14 +232,32 @@ end;
 
 function TPhyWorld.AddParticle(X, Y, Radius: Single; Fixed: Boolean;
   Mass: Single; Restitution: Single): Integer;
+var
+  Flags: Byte;
 begin
   if FParticleCount >= FParticleCapacity then
-  begin
-    FParticleCapacity := FParticleCapacity * 2;
-    SetLength(FParticles, FParticleCapacity);
-  end;
+    GrowParticleArrays;
 
-  FParticles[FParticleCount] := CreateParticle(X, Y, Radius, Fixed, Mass, Restitution);
+  FParticles.PosX[FParticleCount] := X;
+  FParticles.PosY[FParticleCount] := Y;
+  FParticles.OldPosX[FParticleCount] := X;
+  FParticles.OldPosY[FParticleCount] := Y;
+  FParticles.AccelX[FParticleCount] := 0;
+  FParticles.AccelY[FParticleCount] := 0;
+  FParticles.Radius[FParticleCount] := Radius;
+
+  if Fixed or (Mass <= 0) then
+    FParticles.InvMass[FParticleCount] := 0
+  else
+    FParticles.InvMass[FParticleCount] := 1.0 / Mass;
+
+  FParticles.Restitution[FParticleCount] := Restitution;
+
+  Flags := PHY_FLAG_COLLIDABLE;
+  if Fixed then
+    Flags := Flags or PHY_FLAG_FIXED;
+  FParticles.Flags[FParticleCount] := Flags;
+
   Result := FParticleCount;
   Inc(FParticleCount);
 end;
@@ -204,19 +270,19 @@ begin
   FBoxes[FBoxCount] := CreateBox(X, Y, Width, Height, Restitution);
   Result := FBoxCount;
   Inc(FBoxCount);
-
-  // Marquer le box grid comme dirty
   FBoxGridDirty := True;
 end;
 
 function TPhyWorld.AddConstraint(P1, P2: Integer; Stiffness: Single): Integer;
 var
-  Dist: Single;
+  DX, DY, Dist: Single;
 begin
   if FConstraintCount >= Length(FConstraints) then
     SetLength(FConstraints, Length(FConstraints) * 2);
 
-  Dist := Vec2Dist(FParticles[P1].Pos, FParticles[P2].Pos);
+  DX := FParticles.PosX[P2] - FParticles.PosX[P1];
+  DY := FParticles.PosY[P2] - FParticles.PosY[P1];
+  Dist := Sqrt(DX * DX + DY * DY);
 
   FConstraints[FConstraintCount].P1 := P1;
   FConstraints[FConstraintCount].P2 := P2;
@@ -231,10 +297,8 @@ procedure TPhyWorld.Step(DT: Single);
 var
   Iter: Integer;
 begin
-  // Integration Verlet
   Integrate(DT);
 
-  // Resoudre contraintes et collisions
   for Iter := 0 to FCollisionIterations - 1 do
   begin
     SolveConstraints;
@@ -246,180 +310,192 @@ end;
 procedure TPhyWorld.Integrate(DT: Single);
 var
   I: Integer;
-  P: PPhyParticle;
-  Velocity, NewPos: TVec2;
-  DT2: Single;
+  VelX, VelY, NewPosX, NewPosY: Single;
+  DT2, GravX, GravY: Single;
 begin
   DT2 := DT * DT;
+  GravX := FGravity.X;
+  GravY := FGravity.Y;
 
+  // Boucle optimisee SoA - acces sequentiel en memoire
   for I := 0 to FParticleCount - 1 do
   begin
-    P := @FParticles[I];
-
     // Sauter les particules fixes
-    if (P^.Flags and PHY_FLAG_FIXED) <> 0 then
+    if (FParticles.Flags[I] and PHY_FLAG_FIXED) <> 0 then
       Continue;
 
     // Verlet: new_pos = pos + (pos - old_pos) * damping + accel * dt^2
-    Velocity := Vec2Sub(P^.Pos, P^.OldPos);
-    Velocity := Vec2Mul(Velocity, FDamping);
+    VelX := (FParticles.PosX[I] - FParticles.OldPosX[I]) * FDamping;
+    VelY := (FParticles.PosY[I] - FParticles.OldPosY[I]) * FDamping;
 
-    // Ajouter gravite
-    P^.Accel := Vec2Add(P^.Accel, FGravity);
+    // Ajouter gravite a l'acceleration
+    FParticles.AccelX[I] := FParticles.AccelX[I] + GravX;
+    FParticles.AccelY[I] := FParticles.AccelY[I] + GravY;
 
-    NewPos := Vec2Add(P^.Pos, Velocity);
-    NewPos := Vec2Add(NewPos, Vec2Mul(P^.Accel, DT2));
+    NewPosX := FParticles.PosX[I] + VelX + FParticles.AccelX[I] * DT2;
+    NewPosY := FParticles.PosY[I] + VelY + FParticles.AccelY[I] * DT2;
 
-    P^.OldPos := P^.Pos;
-    P^.Pos := NewPos;
+    FParticles.OldPosX[I] := FParticles.PosX[I];
+    FParticles.OldPosY[I] := FParticles.PosY[I];
+    FParticles.PosX[I] := NewPosX;
+    FParticles.PosY[I] := NewPosY;
 
     // Reset acceleration
-    P^.Accel := Vec2(0, 0);
+    FParticles.AccelX[I] := 0;
+    FParticles.AccelY[I] := 0;
   end;
 end;
 
 procedure TPhyWorld.SolveCollisions;
 var
-  I, K, QueryCount: Integer;
-  P, P2: PPhyParticle;
+  I, J, K, QueryCount: Integer;
+  PosX, PosY, Rad: Single;
 begin
-  // Rebuild spatial hash avec pointeurs
+  // Rebuild spatial hash - on stocke maintenant les indices
   FSpatialHash.Clear;
   for I := 0 to FParticleCount - 1 do
   begin
-    P := @FParticles[I];
-    if (P^.Flags and PHY_FLAG_COLLIDABLE) <> 0 then
-      FSpatialHash.Insert(P, P^.Pos.X, P^.Pos.Y, P^.Radius);
+    if (FParticles.Flags[I] and PHY_FLAG_COLLIDABLE) <> 0 then
+      FSpatialHash.Insert(Pointer(NativeUInt(I)), FParticles.PosX[I], FParticles.PosY[I], FParticles.Radius[I]);
   end;
 
-  // Tester collisions via spatial hash - acces direct via pointeurs
+  // Tester collisions via spatial hash
   for I := 0 to FParticleCount - 1 do
   begin
-    P := @FParticles[I];
-    if (P^.Flags and PHY_FLAG_COLLIDABLE) = 0 then
+    if (FParticles.Flags[I] and PHY_FLAG_COLLIDABLE) = 0 then
       Continue;
 
-    QueryCount := FSpatialHash.Query(P, P^.Pos.X, P^.Pos.Y, P^.Radius);
+    PosX := FParticles.PosX[I];
+    PosY := FParticles.PosY[I];
+    Rad := FParticles.Radius[I];
+
+    QueryCount := FSpatialHash.Query(Pointer(NativeUInt(I)), PosX, PosY, Rad);
 
     for K := 0 to QueryCount - 1 do
     begin
-      P2 := PPhyParticle(FSpatialHash.GetQueryResult(K));
-      CollideParticlesPtr(P, P2);  // Nouvelle version avec pointeurs
+      J := Integer(NativeUInt(FSpatialHash.GetQueryResult(K)));
+      CollideParticlesSoA(I, J);
     end;
   end;
 end;
 
-procedure TPhyWorld.CollideParticles(I, J: Integer);
-begin
-  // Deleguer a la version pointeur
-  CollideParticlesPtr(@FParticles[I], @FParticles[J]);
-end;
-
-procedure TPhyWorld.CollideParticlesPtr(P1, P2: PPhyParticle);
+procedure TPhyWorld.CollideParticlesSoA(I, J: Integer);
 var
-  Delta: TVec2;
+  DeltaX, DeltaY: Single;
   DistSq, Dist, MinDist, Overlap, InvDist: Single;
-  Normal, Correction: TVec2;
+  NormalX, NormalY: Single;
   TotalInvMass, Ratio1, Ratio2: Single;
-  RelVel, VelAlongNormal: Single;
-  V1, V2: TVec2;
-  ImpulseScalar: Single;
-  Impulse: TVec2;
+  CorrX, CorrY: Single;
+  V1X, V1Y, V2X, V2Y: Single;
+  RelVel, ImpulseScalar: Single;
+  ImpX, ImpY: Single;
+  InvMass1, InvMass2: Single;
 begin
-  Delta := Vec2Sub(P2^.Pos, P1^.Pos);
-  DistSq := Vec2LengthSq(Delta);
-  MinDist := P1^.Radius + P2^.Radius;
+  DeltaX := FParticles.PosX[J] - FParticles.PosX[I];
+  DeltaY := FParticles.PosY[J] - FParticles.PosY[I];
+  DistSq := DeltaX * DeltaX + DeltaY * DeltaY;
+  MinDist := FParticles.Radius[I] + FParticles.Radius[J];
 
   if DistSq >= MinDist * MinDist then
-    Exit; // Pas de collision
+    Exit;
 
   if DistSq < 0.0001 then
   begin
-    // Particules au meme endroit - separer aleatoirement
-    Delta := Vec2(0.1, 0.1);
-    DistSq := Vec2LengthSq(Delta);
+    DeltaX := 0.1;
+    DeltaY := 0.1;
+    DistSq := 0.02;
   end;
 
-  // Utiliser FastInvSqrt au lieu de Sqrt + division
   InvDist := FastInvSqrt(DistSq);
-  Dist := DistSq * InvDist;  // dist = distSq * (1/sqrt(distSq)) = sqrt(distSq)
+  Dist := DistSq * InvDist;
   Overlap := MinDist - Dist;
-  Normal := Vec2Mul(Delta, InvDist);
+  NormalX := DeltaX * InvDist;
+  NormalY := DeltaY * InvDist;
 
-  // Correction proportionnelle aux masses inverses
-  TotalInvMass := P1^.InvMass + P2^.InvMass;
+  InvMass1 := FParticles.InvMass[I];
+  InvMass2 := FParticles.InvMass[J];
+  TotalInvMass := InvMass1 + InvMass2;
   if TotalInvMass < 0.0001 then
-    Exit; // Les deux sont fixes
+    Exit;
 
-  Ratio1 := P1^.InvMass / TotalInvMass;
-  Ratio2 := P2^.InvMass / TotalInvMass;
+  Ratio1 := InvMass1 / TotalInvMass;
+  Ratio2 := InvMass2 / TotalInvMass;
 
-  Correction := Vec2Mul(Normal, Overlap);
+  CorrX := NormalX * Overlap;
+  CorrY := NormalY * Overlap;
 
   // Separer les particules
-  P1^.Pos := Vec2Sub(P1^.Pos, Vec2Mul(Correction, Ratio1));
-  P2^.Pos := Vec2Add(P2^.Pos, Vec2Mul(Correction, Ratio2));
+  FParticles.PosX[I] := FParticles.PosX[I] - CorrX * Ratio1;
+  FParticles.PosY[I] := FParticles.PosY[I] - CorrY * Ratio1;
+  FParticles.PosX[J] := FParticles.PosX[J] + CorrX * Ratio2;
+  FParticles.PosY[J] := FParticles.PosY[J] + CorrY * Ratio2;
 
-  // Appliquer la restitution (perte d'energie au rebond)
-  // Dans Verlet, la velocite est implicite: V = Pos - OldPos
-  V1 := Vec2Sub(P1^.Pos, P1^.OldPos);
-  V2 := Vec2Sub(P2^.Pos, P2^.OldPos);
+  // Velocites implicites Verlet
+  V1X := FParticles.PosX[I] - FParticles.OldPosX[I];
+  V1Y := FParticles.PosY[I] - FParticles.OldPosY[I];
+  V2X := FParticles.PosX[J] - FParticles.OldPosX[J];
+  V2Y := FParticles.PosY[J] - FParticles.OldPosY[J];
 
   // Velocite relative le long de la normale
-  RelVel := Vec2Dot(Vec2Sub(V2, V1), Normal);
+  RelVel := (V2X - V1X) * NormalX + (V2Y - V1Y) * NormalY;
 
-  // Ne rien faire si les particules s'eloignent deja
   if RelVel > 0 then
     Exit;
 
-  // Calculer l'impulsion avec restitution
+  // Impulsion avec restitution
   ImpulseScalar := -(1 + FRestitution) * RelVel / TotalInvMass;
-  Impulse := Vec2Mul(Normal, ImpulseScalar);
+  ImpX := NormalX * ImpulseScalar;
+  ImpY := NormalY * ImpulseScalar;
 
-  // Modifier OldPos pour simuler le changement de velocite
-  // NewV1 = V1 - Impulse * InvMass1  =>  NewOldPos1 = Pos - NewV1
-  P1^.OldPos := Vec2Sub(P1^.Pos, Vec2Sub(V1, Vec2Mul(Impulse, P1^.InvMass)));
-  P2^.OldPos := Vec2Sub(P2^.Pos, Vec2Add(V2, Vec2Mul(Impulse, P2^.InvMass)));
+  // Modifier OldPos
+  FParticles.OldPosX[I] := FParticles.PosX[I] - (V1X - ImpX * InvMass1);
+  FParticles.OldPosY[I] := FParticles.PosY[I] - (V1Y - ImpY * InvMass1);
+  FParticles.OldPosX[J] := FParticles.PosX[J] - (V2X + ImpX * InvMass2);
+  FParticles.OldPosY[J] := FParticles.PosY[J] - (V2Y + ImpY * InvMass2);
 end;
 
 procedure TPhyWorld.SolveConstraints;
 var
-  I: Integer;
-  C: PPhyConstraint;
-  P1, P2: PPhyParticle;
-  Delta: TVec2;
+  I, P1, P2: Integer;
+  DeltaX, DeltaY: Single;
   DistSq, InvDist, Dist, Diff: Single;
-  Correction: TVec2;
+  CorrX, CorrY: Single;
   TotalInvMass, Ratio1, Ratio2: Single;
+  InvMass1, InvMass2, Stiffness: Single;
 begin
   for I := 0 to FConstraintCount - 1 do
   begin
-    C := @FConstraints[I];
-    P1 := @FParticles[C^.P1];
-    P2 := @FParticles[C^.P2];
+    P1 := FConstraints[I].P1;
+    P2 := FConstraints[I].P2;
+    Stiffness := FConstraints[I].Stiffness;
 
-    Delta := Vec2Sub(P2^.Pos, P1^.Pos);
-    DistSq := Vec2LengthSq(Delta);
+    DeltaX := FParticles.PosX[P2] - FParticles.PosX[P1];
+    DeltaY := FParticles.PosY[P2] - FParticles.PosY[P1];
+    DistSq := DeltaX * DeltaX + DeltaY * DeltaY;
 
     if DistSq < 0.0001 then
       Continue;
 
-    // Utiliser FastInvSqrt au lieu de Vec2Length
     InvDist := FastInvSqrt(DistSq);
     Dist := DistSq * InvDist;
 
-    Diff := (Dist - C^.RestLength) * InvDist;  // = (Dist - RestLength) / Dist
-    Correction := Vec2Mul(Delta, Diff * 0.5 * C^.Stiffness);
+    Diff := (Dist - FConstraints[I].RestLength) * InvDist;
+    CorrX := DeltaX * Diff * 0.5 * Stiffness;
+    CorrY := DeltaY * Diff * 0.5 * Stiffness;
 
-    TotalInvMass := P1^.InvMass + P2^.InvMass;
+    InvMass1 := FParticles.InvMass[P1];
+    InvMass2 := FParticles.InvMass[P2];
+    TotalInvMass := InvMass1 + InvMass2;
     if TotalInvMass < 0.0001 then
       Continue;
 
-    Ratio1 := P1^.InvMass / TotalInvMass;
-    Ratio2 := P2^.InvMass / TotalInvMass;
+    Ratio1 := InvMass1 / TotalInvMass;
+    Ratio2 := InvMass2 / TotalInvMass;
 
-    P1^.Pos := Vec2Add(P1^.Pos, Vec2Mul(Correction, Ratio1 * 2));
-    P2^.Pos := Vec2Sub(P2^.Pos, Vec2Mul(Correction, Ratio2 * 2));
+    FParticles.PosX[P1] := FParticles.PosX[P1] + CorrX * Ratio1 * 2;
+    FParticles.PosY[P1] := FParticles.PosY[P1] + CorrY * Ratio1 * 2;
+    FParticles.PosX[P2] := FParticles.PosX[P2] - CorrX * Ratio2 * 2;
+    FParticles.PosY[P2] := FParticles.PosY[P2] - CorrY * Ratio2 * 2;
   end;
 end;
 
@@ -429,90 +505,85 @@ var
   Box: PPhyBox;
   MinCX, MinCY, MaxCX, MaxCY, CX, CY, CellIdx: Integer;
 begin
-  // Calculer dimensions de la grille
   FBoxGridWidth := Trunc(FWorldWidth * FBoxGridInvCellSize) + 1;
   FBoxGridHeight := Trunc(FWorldHeight * FBoxGridInvCellSize) + 1;
   TotalCells := FBoxGridWidth * FBoxGridHeight;
 
-  // Allouer/reallouer la grille
   SetLength(FBoxGrid, TotalCells);
 
-  // Reset tous les compteurs
   for I := 0 to TotalCells - 1 do
     FBoxGrid[I].Count := 0;
 
-  // Inserer chaque box dans toutes les cellules qu'elle couvre
   for B := 0 to FBoxCount - 1 do
   begin
     Box := @FBoxes[B];
 
-    // Calculer les cellules couvertes par la box
     MinCX := Trunc(Box^.MinX * FBoxGridInvCellSize);
     MinCY := Trunc(Box^.MinY * FBoxGridInvCellSize);
     MaxCX := Trunc(Box^.MaxX * FBoxGridInvCellSize);
     MaxCY := Trunc(Box^.MaxY * FBoxGridInvCellSize);
 
-    // Clamp aux limites de la grille
     if MinCX < 0 then MinCX := 0;
     if MinCY < 0 then MinCY := 0;
     if MaxCX >= FBoxGridWidth then MaxCX := FBoxGridWidth - 1;
     if MaxCY >= FBoxGridHeight then MaxCY := FBoxGridHeight - 1;
 
-    // Inserer dans toutes les cellules couvertes
     for CY := MinCY to MaxCY do
       for CX := MinCX to MaxCX do
       begin
         CellIdx := CY * FBoxGridWidth + CX;
         if FBoxGrid[CellIdx].Count < BOX_GRID_MAX_PER_CELL then
         begin
-          FBoxGrid[CellIdx].Boxes[FBoxGrid[CellIdx].Count] := Box;  // Stocker le pointeur directement
+          FBoxGrid[CellIdx].Boxes[FBoxGrid[CellIdx].Count] := Box;
           Inc(FBoxGrid[CellIdx].Count);
         end;
-        // Si overflow, on ignore (rare en pratique)
       end;
   end;
 
   FBoxGridDirty := False;
 end;
 
-procedure TPhyWorld.CollideParticleBox(P: PPhyParticle; Box: PPhyBox);
+procedure TPhyWorld.CollideParticleBoxSoA(I: Integer; Box: PPhyBox);
 var
+  PosX, PosY, Rad: Single;
   ClosestX, ClosestY: Single;
   DX, DY, DistSq, Dist, Overlap: Single;
   NX, NY: Single;
   EdgeDistLeft, EdgeDistRight, EdgeDistTop, EdgeDistBottom, MinEdgeDist: Single;
+  InvDist: Single;
 begin
+  PosX := FParticles.PosX[I];
+  PosY := FParticles.PosY[I];
+  Rad := FParticles.Radius[I];
+
   // Trouver le point le plus proche sur le rectangle
-  if P^.Pos.X < Box^.MinX then
+  if PosX < Box^.MinX then
     ClosestX := Box^.MinX
-  else if P^.Pos.X > Box^.MaxX then
+  else if PosX > Box^.MaxX then
     ClosestX := Box^.MaxX
   else
-    ClosestX := P^.Pos.X;
+    ClosestX := PosX;
 
-  if P^.Pos.Y < Box^.MinY then
+  if PosY < Box^.MinY then
     ClosestY := Box^.MinY
-  else if P^.Pos.Y > Box^.MaxY then
+  else if PosY > Box^.MaxY then
     ClosestY := Box^.MaxY
   else
-    ClosestY := P^.Pos.Y;
+    ClosestY := PosY;
 
-  // Vecteur du point le plus proche vers le centre du cercle
-  DX := P^.Pos.X - ClosestX;
-  DY := P^.Pos.Y - ClosestY;
+  DX := PosX - ClosestX;
+  DY := PosY - ClosestY;
   DistSq := DX * DX + DY * DY;
 
-  // Collision si distance < rayon
-  if DistSq < P^.Radius * P^.Radius then
+  if DistSq < Rad * Rad then
   begin
-    // Cas special: cercle completement a l'interieur du rectangle
     if DistSq < 0.0001 then
     begin
-      // Pousser vers le bord le plus proche
-      EdgeDistLeft := P^.Pos.X - Box^.MinX;
-      EdgeDistRight := Box^.MaxX - P^.Pos.X;
-      EdgeDistTop := P^.Pos.Y - Box^.MinY;
-      EdgeDistBottom := Box^.MaxY - P^.Pos.Y;
+      // Cercle a l'interieur - pousser vers le bord le plus proche
+      EdgeDistLeft := PosX - Box^.MinX;
+      EdgeDistRight := Box^.MaxX - PosX;
+      EdgeDistTop := PosY - Box^.MinY;
+      EdgeDistBottom := Box^.MaxY - PosY;
       MinEdgeDist := EdgeDistLeft;
       NX := -1; NY := 0;
 
@@ -532,22 +603,21 @@ begin
         NX := 0; NY := 1;
       end;
 
-      P^.Pos.X := P^.Pos.X + NX * (MinEdgeDist + P^.Radius);
-      P^.Pos.Y := P^.Pos.Y + NY * (MinEdgeDist + P^.Radius);
+      FParticles.PosX[I] := PosX + NX * (MinEdgeDist + Rad);
+      FParticles.PosY[I] := PosY + NY * (MinEdgeDist + Rad);
     end
     else
     begin
-      // Cas normal: pousser le cercle hors du rectangle
-      Dist := Sqrt(DistSq);
-      Overlap := P^.Radius - Dist;
+      // Cas normal
+      InvDist := FastInvSqrt(DistSq);
+      Dist := DistSq * InvDist;
+      Overlap := Rad - Dist;
 
-      // Normaliser le vecteur de direction
-      NX := DX / Dist;
-      NY := DY / Dist;
+      NX := DX * InvDist;
+      NY := DY * InvDist;
 
-      // Deplacer le cercle exactement au bord
-      P^.Pos.X := P^.Pos.X + NX * Overlap;
-      P^.Pos.Y := P^.Pos.Y + NY * Overlap;
+      FParticles.PosX[I] := PosX + NX * Overlap;
+      FParticles.PosY[I] := PosY + NY * Overlap;
     end;
   end;
 end;
@@ -555,40 +625,43 @@ end;
 procedure TPhyWorld.SolveBoxCollisions;
 var
   I, K: Integer;
-  P: PPhyParticle;
+  PosX, PosY, Rad: Single;
   CellX, CellY, CellIdx: Integer;
   Cell: ^TBoxGridCell;
 begin
-  // Rebuild box grid si necessaire
   if FBoxGridDirty then
     RebuildBoxGrid;
 
   for I := 0 to FParticleCount - 1 do
   begin
-    P := @FParticles[I];
-    if (P^.Flags and PHY_FLAG_FIXED) <> 0 then
+    if (FParticles.Flags[I] and PHY_FLAG_FIXED) <> 0 then
       Continue;
-    if (P^.Flags and PHY_FLAG_COLLIDABLE) = 0 then
+    if (FParticles.Flags[I] and PHY_FLAG_COLLIDABLE) = 0 then
       Continue;
 
-    // Collision avec les bords du monde (containeur principal)
-    if P^.Pos.X < P^.Radius then
-      P^.Pos.X := P^.Radius;
-    if P^.Pos.X > FWorldWidth - P^.Radius then
-      P^.Pos.X := FWorldWidth - P^.Radius;
-    if P^.Pos.Y < P^.Radius then
-      P^.Pos.Y := P^.Radius;
-    if P^.Pos.Y > FWorldHeight - P^.Radius then
-      P^.Pos.Y := FWorldHeight - P^.Radius;
+    PosX := FParticles.PosX[I];
+    PosY := FParticles.PosY[I];
+    Rad := FParticles.Radius[I];
 
-    // Collision avec les boxes via spatial hash
+    // Collision avec les bords du monde
+    if PosX < Rad then
+      PosX := Rad;
+    if PosX > FWorldWidth - Rad then
+      PosX := FWorldWidth - Rad;
+    if PosY < Rad then
+      PosY := Rad;
+    if PosY > FWorldHeight - Rad then
+      PosY := FWorldHeight - Rad;
+
+    FParticles.PosX[I] := PosX;
+    FParticles.PosY[I] := PosY;
+
+    // Collision avec les boxes
     if FBoxCount > 0 then
     begin
-      // Trouver la cellule de la particule
-      CellX := Trunc(P^.Pos.X * FBoxGridInvCellSize);
-      CellY := Trunc(P^.Pos.Y * FBoxGridInvCellSize);
+      CellX := Trunc(PosX * FBoxGridInvCellSize);
+      CellY := Trunc(PosY * FBoxGridInvCellSize);
 
-      // Clamp
       if CellX < 0 then CellX := 0;
       if CellY < 0 then CellY := 0;
       if CellX >= FBoxGridWidth then CellX := FBoxGridWidth - 1;
@@ -597,9 +670,8 @@ begin
       CellIdx := CellY * FBoxGridWidth + CellX;
       Cell := @FBoxGrid[CellIdx];
 
-      // Tester collision avec les boxes de cette cellule - acces direct via pointeur
       for K := 0 to Cell^.Count - 1 do
-        CollideParticleBox(P, Cell^.Boxes[K]);  // Plus besoin de @FBoxes[B]
+        CollideParticleBoxSoA(I, Cell^.Boxes[K]);
     end;
   end;
 end;
@@ -613,12 +685,49 @@ end;
 
 function TPhyWorld.GetParticle(Index: Integer): PPhyParticle;
 begin
-  Result := @FParticles[Index];
+  // Reconstruit une structure temporaire pour compatibilite
+  FTempParticle.Pos.X := FParticles.PosX[Index];
+  FTempParticle.Pos.Y := FParticles.PosY[Index];
+  FTempParticle.OldPos.X := FParticles.OldPosX[Index];
+  FTempParticle.OldPos.Y := FParticles.OldPosY[Index];
+  FTempParticle.Accel.X := FParticles.AccelX[Index];
+  FTempParticle.Accel.Y := FParticles.AccelY[Index];
+  FTempParticle.Radius := FParticles.Radius[Index];
+  FTempParticle.InvMass := FParticles.InvMass[Index];
+  FTempParticle.Restitution := FParticles.Restitution[Index];
+  FTempParticle.Flags := FParticles.Flags[Index];
+  Result := @FTempParticle;
 end;
 
 function TPhyWorld.GetBox(Index: Integer): PPhyBox;
 begin
   Result := @FBoxes[Index];
+end;
+
+// Acces direct SoA - plus rapide pour le rendu
+function TPhyWorld.GetPosX(Index: Integer): Single;
+begin
+  Result := FParticles.PosX[Index];
+end;
+
+function TPhyWorld.GetPosY(Index: Integer): Single;
+begin
+  Result := FParticles.PosY[Index];
+end;
+
+function TPhyWorld.GetRadius(Index: Integer): Single;
+begin
+  Result := FParticles.Radius[Index];
+end;
+
+function TPhyWorld.GetOldPosX(Index: Integer): Single;
+begin
+  Result := FParticles.OldPosX[Index];
+end;
+
+function TPhyWorld.GetOldPosY(Index: Integer): Single;
+begin
+  Result := FParticles.OldPosY[Index];
 end;
 
 end.
