@@ -39,10 +39,20 @@ interface
 uses
   GS.Phy.Vec2,
   GS.Phy.Types,
+  GS.Phy.AABB,
   GS.Phy.SpatialHash;
 
 const
   BOX_GRID_MAX_PER_CELL = 8;
+
+  // Object type tags for spatial hash (2 bits = 4 types max)
+  TAG_PARTICLE = 0;
+  TAG_AABB     = 1;
+  TAG_OBB      = 2;  // Reserved for future
+  TAG_MESH     = 3;  // Reserved for future
+  TAG_SHIFT    = 29;
+  TAG_MASK     = $E0000000;  // Top 3 bits
+  INDEX_MASK   = $1FFFFFFF;  // Bottom 29 bits
 
 type
   // Spatial hash pour boxes statiques - array fixe de pointeurs par cellule
@@ -67,13 +77,19 @@ type
 
   TPhyWorld = class
   private
-    // SoA pour les particules
+    // SoA for particles
     FParticles: TParticleSoA;
     FParticleCount: Integer;
     FParticleCapacity: Integer;
 
-    // Pour compatibilite avec GetParticle - cache temporaire
+    // SoA for dynamic AABBs
+    FAABBs: TAABBSoA;
+    FAABBCount: Integer;
+    FAABBCapacity: Integer;
+
+    // Temp cache for GetParticle/GetAABB compatibility
     FTempParticle: TPhyParticle;
+    FTempAABB: TPhyAABB;
 
     FBoxes: array of TPhyBox;
     FBoxCount: Integer;
@@ -98,13 +114,21 @@ type
     FBoxGridDirty: Boolean;
 
     procedure GrowParticleArrays;
+    procedure GrowAABBArrays;
     procedure Integrate(DT: Single);
+    procedure IntegrateAABBs(DT: Single);
     procedure SolveCollisions;
+    procedure SolveAABBCollisions;
+    procedure SolveParticleAABBCollisions;
     procedure SolveConstraints;
     procedure SolveBoxCollisions;
+    procedure SolveAABBBoxCollisions;
     procedure CollideParticlesSoA(I, J: Integer);
+    procedure CollideAABBsSoA(I, J: Integer);
+    procedure CollideParticleAABBSoA(PI, AI: Integer);
     procedure RebuildBoxGrid;
     procedure CollideParticleBoxSoA(I: Integer; Box: PPhyBox);
+    procedure CollideAABBBoxSoA(I: Integer; Box: PPhyBox);
   public
     constructor Create;
     destructor Destroy; override;
@@ -114,6 +138,8 @@ type
 
     function AddParticle(X, Y, Radius: Single; Fixed: Boolean = False;
       Mass: Single = 1.0; Restitution: Single = 0.5): Integer;
+    function AddAABB(X, Y, Width, Height: Single; Fixed: Boolean = False;
+      Mass: Single = 1.0; Restitution: Single = 0.5): Integer;
     function AddBox(X, Y, Width, Height: Single; Restitution: Single = 0.3): Integer;
     function AddConstraint(P1, P2: Integer; Stiffness: Single = 1.0): Integer;
 
@@ -121,16 +147,26 @@ type
     procedure Clear;
 
     function GetParticle(Index: Integer): PPhyParticle;
+    function GetAABB(Index: Integer): PPhyAABB;
     function GetBox(Index: Integer): PPhyBox; inline;
 
-    // Acces direct SoA pour le rendu (plus rapide)
+    // Direct SoA access for particles (faster for rendering)
     function GetPosX(Index: Integer): Single; inline;
     function GetPosY(Index: Integer): Single; inline;
     function GetRadius(Index: Integer): Single; inline;
     function GetOldPosX(Index: Integer): Single; inline;
     function GetOldPosY(Index: Integer): Single; inline;
 
+    // Direct SoA access for AABBs
+    function GetAABBPosX(Index: Integer): Single; inline;
+    function GetAABBPosY(Index: Integer): Single; inline;
+    function GetAABBOldPosX(Index: Integer): Single; inline;
+    function GetAABBOldPosY(Index: Integer): Single; inline;
+    function GetAABBHalfW(Index: Integer): Single; inline;
+    function GetAABBHalfH(Index: Integer): Single; inline;
+
     property ParticleCount: Integer read FParticleCount;
+    property AABBCount: Integer read FAABBCount;
     property BoxCount: Integer read FBoxCount;
     property ConstraintCount: Integer read FConstraintCount;
     property CollisionIterations: Integer read FCollisionIterations write FCollisionIterations;
@@ -159,13 +195,29 @@ begin
   SetLength(FParticles.Flags, FParticleCapacity);
 end;
 
+procedure TPhyWorld.GrowAABBArrays;
+begin
+  FAABBCapacity := FAABBCapacity * 2;
+  SetLength(FAABBs.PosX, FAABBCapacity);
+  SetLength(FAABBs.PosY, FAABBCapacity);
+  SetLength(FAABBs.OldPosX, FAABBCapacity);
+  SetLength(FAABBs.OldPosY, FAABBCapacity);
+  SetLength(FAABBs.AccelX, FAABBCapacity);
+  SetLength(FAABBs.AccelY, FAABBCapacity);
+  SetLength(FAABBs.HalfW, FAABBCapacity);
+  SetLength(FAABBs.HalfH, FAABBCapacity);
+  SetLength(FAABBs.InvMass, FAABBCapacity);
+  SetLength(FAABBs.Restitution, FAABBCapacity);
+  SetLength(FAABBs.Flags, FAABBCapacity);
+end;
+
 constructor TPhyWorld.Create;
 begin
   inherited;
   FParticleCount := 0;
   FParticleCapacity := INITIAL_CAPACITY;
 
-  // Allouer les tableaux SoA
+  // Allocate particle SoA arrays
   SetLength(FParticles.PosX, FParticleCapacity);
   SetLength(FParticles.PosY, FParticleCapacity);
   SetLength(FParticles.OldPosX, FParticleCapacity);
@@ -176,6 +228,21 @@ begin
   SetLength(FParticles.InvMass, FParticleCapacity);
   SetLength(FParticles.Restitution, FParticleCapacity);
   SetLength(FParticles.Flags, FParticleCapacity);
+
+  // Allocate AABB SoA arrays
+  FAABBCount := 0;
+  FAABBCapacity := INITIAL_CAPACITY;
+  SetLength(FAABBs.PosX, FAABBCapacity);
+  SetLength(FAABBs.PosY, FAABBCapacity);
+  SetLength(FAABBs.OldPosX, FAABBCapacity);
+  SetLength(FAABBs.OldPosY, FAABBCapacity);
+  SetLength(FAABBs.AccelX, FAABBCapacity);
+  SetLength(FAABBs.AccelY, FAABBCapacity);
+  SetLength(FAABBs.HalfW, FAABBCapacity);
+  SetLength(FAABBs.HalfH, FAABBCapacity);
+  SetLength(FAABBs.InvMass, FAABBCapacity);
+  SetLength(FAABBs.Restitution, FAABBCapacity);
+  SetLength(FAABBs.Flags, FAABBCapacity);
 
   FBoxCount := 0;
   SetLength(FBoxes, 16);
@@ -262,6 +329,39 @@ begin
   Inc(FParticleCount);
 end;
 
+function TPhyWorld.AddAABB(X, Y, Width, Height: Single; Fixed: Boolean;
+  Mass: Single; Restitution: Single): Integer;
+var
+  Flags: Byte;
+begin
+  if FAABBCount >= FAABBCapacity then
+    GrowAABBArrays;
+
+  FAABBs.PosX[FAABBCount] := X;
+  FAABBs.PosY[FAABBCount] := Y;
+  FAABBs.OldPosX[FAABBCount] := X;
+  FAABBs.OldPosY[FAABBCount] := Y;
+  FAABBs.AccelX[FAABBCount] := 0;
+  FAABBs.AccelY[FAABBCount] := 0;
+  FAABBs.HalfW[FAABBCount] := Width * 0.5;
+  FAABBs.HalfH[FAABBCount] := Height * 0.5;
+
+  if Fixed or (Mass <= 0) then
+    FAABBs.InvMass[FAABBCount] := 0
+  else
+    FAABBs.InvMass[FAABBCount] := 1.0 / Mass;
+
+  FAABBs.Restitution[FAABBCount] := Restitution;
+
+  Flags := PHY_FLAG_COLLIDABLE;
+  if Fixed then
+    Flags := Flags or PHY_FLAG_FIXED;
+  FAABBs.Flags[FAABBCount] := Flags;
+
+  Result := FAABBCount;
+  Inc(FAABBCount);
+end;
+
 function TPhyWorld.AddBox(X, Y, Width, Height: Single; Restitution: Single): Integer;
 begin
   if FBoxCount >= Length(FBoxes) then
@@ -298,12 +398,14 @@ var
   Iter: Integer;
 begin
   Integrate(DT);
+  IntegrateAABBs(DT);
 
   for Iter := 0 to FCollisionIterations - 1 do
   begin
     SolveConstraints;
-    SolveCollisions;
+    SolveCollisions;  // Unified: particle-particle, particle-AABB, AABB-AABB via spatial hash
     SolveBoxCollisions;
+    SolveAABBBoxCollisions;
   end;
 end;
 
@@ -346,20 +448,86 @@ begin
   end;
 end;
 
+procedure TPhyWorld.IntegrateAABBs(DT: Single);
+var
+  I: Integer;
+  VelX, VelY, NewPosX, NewPosY: Single;
+  DT2, GravX, GravY: Single;
+begin
+  DT2 := DT * DT;
+  GravX := FGravity.X;
+  GravY := FGravity.Y;
+
+  for I := 0 to FAABBCount - 1 do
+  begin
+    if (FAABBs.Flags[I] and PHY_FLAG_FIXED) <> 0 then
+      Continue;
+
+    // Verlet integration
+    VelX := (FAABBs.PosX[I] - FAABBs.OldPosX[I]) * FDamping;
+    VelY := (FAABBs.PosY[I] - FAABBs.OldPosY[I]) * FDamping;
+
+    FAABBs.AccelX[I] := FAABBs.AccelX[I] + GravX;
+    FAABBs.AccelY[I] := FAABBs.AccelY[I] + GravY;
+
+    NewPosX := FAABBs.PosX[I] + VelX + FAABBs.AccelX[I] * DT2;
+    NewPosY := FAABBs.PosY[I] + VelY + FAABBs.AccelY[I] * DT2;
+
+    FAABBs.OldPosX[I] := FAABBs.PosX[I];
+    FAABBs.OldPosY[I] := FAABBs.PosY[I];
+    FAABBs.PosX[I] := NewPosX;
+    FAABBs.PosY[I] := NewPosY;
+
+    FAABBs.AccelX[I] := 0;
+    FAABBs.AccelY[I] := 0;
+  end;
+end;
+
+function EncodeTag(ObjType, Index: Integer): NativeUInt; inline;
+begin
+  Result := (NativeUInt(ObjType) shl TAG_SHIFT) or NativeUInt(Index);
+end;
+
+procedure DecodeTag(Tag: NativeUInt; out ObjType, Index: Integer); inline;
+begin
+  ObjType := Integer((Tag and TAG_MASK) shr TAG_SHIFT);
+  Index := Integer(Tag and INDEX_MASK);
+end;
+
 procedure TPhyWorld.SolveCollisions;
 var
-  I, J, K, QueryCount: Integer;
+  I, K, QueryCount: Integer;
   PosX, PosY, Rad: Single;
+  HW, HH: Single;
+  Tag: NativeUInt;
+  ObjType, ObjIndex: Integer;
+  SelfTag: NativeUInt;
 begin
-  // Rebuild spatial hash - on stocke maintenant les indices
+  // Rebuild spatial hash with ALL dynamic objects
   FSpatialHash.Clear;
+
+  // Insert particles
   for I := 0 to FParticleCount - 1 do
   begin
     if (FParticles.Flags[I] and PHY_FLAG_COLLIDABLE) <> 0 then
-      FSpatialHash.Insert(Pointer(NativeUInt(I)), FParticles.PosX[I], FParticles.PosY[I], FParticles.Radius[I]);
+      FSpatialHash.Insert(Pointer(EncodeTag(TAG_PARTICLE, I)),
+        FParticles.PosX[I], FParticles.PosY[I], FParticles.Radius[I]);
   end;
 
-  // Tester collisions via spatial hash
+  // Insert AABBs with bounding radius
+  for I := 0 to FAABBCount - 1 do
+  begin
+    if (FAABBs.Flags[I] and PHY_FLAG_COLLIDABLE) <> 0 then
+    begin
+      HW := FAABBs.HalfW[I];
+      HH := FAABBs.HalfH[I];
+      if HW > HH then Rad := HW else Rad := HH;  // Bounding radius = max extent
+      FSpatialHash.Insert(Pointer(EncodeTag(TAG_AABB, I)),
+        FAABBs.PosX[I], FAABBs.PosY[I], Rad);
+    end;
+  end;
+
+  // Query from particles
   for I := 0 to FParticleCount - 1 do
   begin
     if (FParticles.Flags[I] and PHY_FLAG_COLLIDABLE) = 0 then
@@ -368,13 +536,45 @@ begin
     PosX := FParticles.PosX[I];
     PosY := FParticles.PosY[I];
     Rad := FParticles.Radius[I];
+    SelfTag := EncodeTag(TAG_PARTICLE, I);
 
-    QueryCount := FSpatialHash.Query(Pointer(NativeUInt(I)), PosX, PosY, Rad);
+    QueryCount := FSpatialHash.Query(Pointer(SelfTag), PosX, PosY, Rad);
 
     for K := 0 to QueryCount - 1 do
     begin
-      J := Integer(NativeUInt(FSpatialHash.GetQueryResult(K)));
-      CollideParticlesSoA(I, J);
+      Tag := NativeUInt(FSpatialHash.GetQueryResult(K));
+      DecodeTag(Tag, ObjType, ObjIndex);
+
+      case ObjType of
+        TAG_PARTICLE: CollideParticlesSoA(I, ObjIndex);
+        TAG_AABB: CollideParticleAABBSoA(I, ObjIndex);
+      end;
+    end;
+  end;
+
+  // Query from AABBs (only need to check AABB-AABB, particle-AABB already handled)
+  for I := 0 to FAABBCount - 1 do
+  begin
+    if (FAABBs.Flags[I] and PHY_FLAG_COLLIDABLE) = 0 then
+      Continue;
+
+    PosX := FAABBs.PosX[I];
+    PosY := FAABBs.PosY[I];
+    HW := FAABBs.HalfW[I];
+    HH := FAABBs.HalfH[I];
+    if HW > HH then Rad := HW else Rad := HH;
+    SelfTag := EncodeTag(TAG_AABB, I);
+
+    QueryCount := FSpatialHash.Query(Pointer(SelfTag), PosX, PosY, Rad);
+
+    for K := 0 to QueryCount - 1 do
+    begin
+      Tag := NativeUInt(FSpatialHash.GetQueryResult(K));
+      DecodeTag(Tag, ObjType, ObjIndex);
+
+      // Only AABB-AABB here (particle-AABB already done above)
+      if ObjType = TAG_AABB then
+        CollideAABBsSoA(I, ObjIndex);
     end;
   end;
 end;
@@ -447,11 +647,235 @@ begin
   ImpX := NormalX * ImpulseScalar;
   ImpY := NormalY * ImpulseScalar;
 
-  // Modifier OldPos
+  // Modify OldPos for impulse
   FParticles.OldPosX[I] := FParticles.PosX[I] - (V1X - ImpX * InvMass1);
   FParticles.OldPosY[I] := FParticles.PosY[I] - (V1Y - ImpY * InvMass1);
   FParticles.OldPosX[J] := FParticles.PosX[J] - (V2X + ImpX * InvMass2);
   FParticles.OldPosY[J] := FParticles.PosY[J] - (V2Y + ImpY * InvMass2);
+end;
+
+// AABB vs AABB collision - simple O(n^2) for now, can optimize with spatial hash later
+procedure TPhyWorld.SolveAABBCollisions;
+var
+  I, J: Integer;
+begin
+  for I := 0 to FAABBCount - 2 do
+  begin
+    if (FAABBs.Flags[I] and PHY_FLAG_COLLIDABLE) = 0 then
+      Continue;
+    for J := I + 1 to FAABBCount - 1 do
+    begin
+      if (FAABBs.Flags[J] and PHY_FLAG_COLLIDABLE) = 0 then
+        Continue;
+      CollideAABBsSoA(I, J);
+    end;
+  end;
+end;
+
+procedure TPhyWorld.CollideAABBsSoA(I, J: Integer);
+var
+  MinX1, MaxX1, MinY1, MaxY1: Single;
+  MinX2, MaxX2, MinY2, MaxY2: Single;
+  OverlapX, OverlapY: Single;
+  NX, NY, Overlap: Single;
+  TotalInvMass, Ratio1, Ratio2: Single;
+  InvMass1, InvMass2: Single;
+  V1X, V1Y, V2X, V2Y: Single;
+  RelVel, ImpulseScalar: Single;
+  ImpX, ImpY: Single;
+begin
+  // Compute bounds
+  MinX1 := FAABBs.PosX[I] - FAABBs.HalfW[I];
+  MaxX1 := FAABBs.PosX[I] + FAABBs.HalfW[I];
+  MinY1 := FAABBs.PosY[I] - FAABBs.HalfH[I];
+  MaxY1 := FAABBs.PosY[I] + FAABBs.HalfH[I];
+
+  MinX2 := FAABBs.PosX[J] - FAABBs.HalfW[J];
+  MaxX2 := FAABBs.PosX[J] + FAABBs.HalfW[J];
+  MinY2 := FAABBs.PosY[J] - FAABBs.HalfH[J];
+  MaxY2 := FAABBs.PosY[J] + FAABBs.HalfH[J];
+
+  // AABB overlap test
+  if (MaxX1 < MinX2) or (MinX1 > MaxX2) or (MaxY1 < MinY2) or (MinY1 > MaxY2) then
+    Exit;
+
+  // Compute overlap on each axis
+  if FAABBs.PosX[I] < FAABBs.PosX[J] then
+    OverlapX := MaxX1 - MinX2
+  else
+    OverlapX := MaxX2 - MinX1;
+
+  if FAABBs.PosY[I] < FAABBs.PosY[J] then
+    OverlapY := MaxY1 - MinY2
+  else
+    OverlapY := MaxY2 - MinY1;
+
+  // Push along minimum overlap axis
+  if OverlapX < OverlapY then
+  begin
+    Overlap := OverlapX;
+    if FAABBs.PosX[I] < FAABBs.PosX[J] then
+    begin NX := -1; NY := 0; end
+    else
+    begin NX := 1; NY := 0; end;
+  end
+  else
+  begin
+    Overlap := OverlapY;
+    if FAABBs.PosY[I] < FAABBs.PosY[J] then
+    begin NX := 0; NY := -1; end
+    else
+    begin NX := 0; NY := 1; end;
+  end;
+
+  InvMass1 := FAABBs.InvMass[I];
+  InvMass2 := FAABBs.InvMass[J];
+  TotalInvMass := InvMass1 + InvMass2;
+  if TotalInvMass < 0.0001 then
+    Exit;
+
+  Ratio1 := InvMass1 / TotalInvMass;
+  Ratio2 := InvMass2 / TotalInvMass;
+
+  // Separate
+  FAABBs.PosX[I] := FAABBs.PosX[I] + NX * Overlap * Ratio1;
+  FAABBs.PosY[I] := FAABBs.PosY[I] + NY * Overlap * Ratio1;
+  FAABBs.PosX[J] := FAABBs.PosX[J] - NX * Overlap * Ratio2;
+  FAABBs.PosY[J] := FAABBs.PosY[J] - NY * Overlap * Ratio2;
+
+  // Verlet velocities
+  V1X := FAABBs.PosX[I] - FAABBs.OldPosX[I];
+  V1Y := FAABBs.PosY[I] - FAABBs.OldPosY[I];
+  V2X := FAABBs.PosX[J] - FAABBs.OldPosX[J];
+  V2Y := FAABBs.PosY[J] - FAABBs.OldPosY[J];
+
+  RelVel := (V1X - V2X) * NX + (V1Y - V2Y) * NY;
+  if RelVel > 0 then
+    Exit;
+
+  ImpulseScalar := -(1 + FRestitution) * RelVel / TotalInvMass;
+  ImpX := NX * ImpulseScalar;
+  ImpY := NY * ImpulseScalar;
+
+  FAABBs.OldPosX[I] := FAABBs.PosX[I] - (V1X + ImpX * InvMass1);
+  FAABBs.OldPosY[I] := FAABBs.PosY[I] - (V1Y + ImpY * InvMass1);
+  FAABBs.OldPosX[J] := FAABBs.PosX[J] - (V2X - ImpX * InvMass2);
+  FAABBs.OldPosY[J] := FAABBs.PosY[J] - (V2Y - ImpY * InvMass2);
+end;
+
+// Particle vs AABB collision
+procedure TPhyWorld.SolveParticleAABBCollisions;
+var
+  PI, AI: Integer;
+begin
+  for PI := 0 to FParticleCount - 1 do
+  begin
+    if (FParticles.Flags[PI] and PHY_FLAG_COLLIDABLE) = 0 then
+      Continue;
+    for AI := 0 to FAABBCount - 1 do
+    begin
+      if (FAABBs.Flags[AI] and PHY_FLAG_COLLIDABLE) = 0 then
+        Continue;
+      CollideParticleAABBSoA(PI, AI);
+    end;
+  end;
+end;
+
+procedure TPhyWorld.CollideParticleAABBSoA(PI, AI: Integer);
+var
+  PosX, PosY, Rad: Single;
+  MinX, MaxX, MinY, MaxY: Single;
+  ClosestX, ClosestY: Single;
+  DX, DY, DistSq, Dist, Overlap: Single;
+  NX, NY, InvDist: Single;
+  TotalInvMass, Ratio1, Ratio2: Single;
+  InvMassP, InvMassA: Single;
+  VPX, VPY, VAX, VAY: Single;
+  RelVel, ImpulseScalar, ImpX, ImpY: Single;
+begin
+  PosX := FParticles.PosX[PI];
+  PosY := FParticles.PosY[PI];
+  Rad := FParticles.Radius[PI];
+
+  MinX := FAABBs.PosX[AI] - FAABBs.HalfW[AI];
+  MaxX := FAABBs.PosX[AI] + FAABBs.HalfW[AI];
+  MinY := FAABBs.PosY[AI] - FAABBs.HalfH[AI];
+  MaxY := FAABBs.PosY[AI] + FAABBs.HalfH[AI];
+
+  // Closest point on AABB to particle center
+  if PosX < MinX then ClosestX := MinX
+  else if PosX > MaxX then ClosestX := MaxX
+  else ClosestX := PosX;
+
+  if PosY < MinY then ClosestY := MinY
+  else if PosY > MaxY then ClosestY := MaxY
+  else ClosestY := PosY;
+
+  DX := PosX - ClosestX;
+  DY := PosY - ClosestY;
+  DistSq := DX * DX + DY * DY;
+
+  if DistSq >= Rad * Rad then
+    Exit;
+
+  InvMassP := FParticles.InvMass[PI];
+  InvMassA := FAABBs.InvMass[AI];
+  TotalInvMass := InvMassP + InvMassA;
+  if TotalInvMass < 0.0001 then
+    Exit;
+
+  if DistSq < 0.0001 then
+  begin
+    // Particle inside AABB - push to nearest edge
+    DX := PosX - FAABBs.PosX[AI];
+    DY := PosY - FAABBs.PosY[AI];
+    if Abs(DX) > Abs(DY) then
+    begin
+      if DX > 0 then begin NX := 1; NY := 0; Overlap := MaxX - PosX + Rad; end
+      else begin NX := -1; NY := 0; Overlap := PosX - MinX + Rad; end;
+    end
+    else
+    begin
+      if DY > 0 then begin NX := 0; NY := 1; Overlap := MaxY - PosY + Rad; end
+      else begin NX := 0; NY := -1; Overlap := PosY - MinY + Rad; end;
+    end;
+  end
+  else
+  begin
+    InvDist := FastInvSqrt(DistSq);
+    Dist := DistSq * InvDist;
+    Overlap := Rad - Dist;
+    NX := DX * InvDist;
+    NY := DY * InvDist;
+  end;
+
+  Ratio1 := InvMassP / TotalInvMass;
+  Ratio2 := InvMassA / TotalInvMass;
+
+  // Separate
+  FParticles.PosX[PI] := PosX + NX * Overlap * Ratio1;
+  FParticles.PosY[PI] := PosY + NY * Overlap * Ratio1;
+  FAABBs.PosX[AI] := FAABBs.PosX[AI] - NX * Overlap * Ratio2;
+  FAABBs.PosY[AI] := FAABBs.PosY[AI] - NY * Overlap * Ratio2;
+
+  // Verlet velocities
+  VPX := FParticles.PosX[PI] - FParticles.OldPosX[PI];
+  VPY := FParticles.PosY[PI] - FParticles.OldPosY[PI];
+  VAX := FAABBs.PosX[AI] - FAABBs.OldPosX[AI];
+  VAY := FAABBs.PosY[AI] - FAABBs.OldPosY[AI];
+
+  RelVel := (VPX - VAX) * NX + (VPY - VAY) * NY;
+  if RelVel > 0 then
+    Exit;
+
+  ImpulseScalar := -(1 + FRestitution) * RelVel / TotalInvMass;
+  ImpX := NX * ImpulseScalar;
+  ImpY := NY * ImpulseScalar;
+
+  FParticles.OldPosX[PI] := FParticles.PosX[PI] - (VPX + ImpX * InvMassP);
+  FParticles.OldPosY[PI] := FParticles.PosY[PI] - (VPY + ImpY * InvMassP);
+  FAABBs.OldPosX[AI] := FAABBs.PosX[AI] - (VAX - ImpX * InvMassA);
+  FAABBs.OldPosY[AI] := FAABBs.PosY[AI] - (VAY - ImpY * InvMassA);
 end;
 
 procedure TPhyWorld.SolveConstraints;
@@ -676,9 +1100,110 @@ begin
   end;
 end;
 
+procedure TPhyWorld.SolveAABBBoxCollisions;
+var
+  I, K: Integer;
+  PosX, PosY, HW, HH: Single;
+  CellX, CellY, CellIdx: Integer;
+  Cell: ^TBoxGridCell;
+begin
+  if FBoxGridDirty then
+    RebuildBoxGrid;
+
+  for I := 0 to FAABBCount - 1 do
+  begin
+    if (FAABBs.Flags[I] and PHY_FLAG_FIXED) <> 0 then
+      Continue;
+    if (FAABBs.Flags[I] and PHY_FLAG_COLLIDABLE) = 0 then
+      Continue;
+
+    PosX := FAABBs.PosX[I];
+    PosY := FAABBs.PosY[I];
+    HW := FAABBs.HalfW[I];
+    HH := FAABBs.HalfH[I];
+
+    // World bounds collision
+    if PosX - HW < 0 then PosX := HW;
+    if PosX + HW > FWorldWidth then PosX := FWorldWidth - HW;
+    if PosY - HH < 0 then PosY := HH;
+    if PosY + HH > FWorldHeight then PosY := FWorldHeight - HH;
+
+    FAABBs.PosX[I] := PosX;
+    FAABBs.PosY[I] := PosY;
+
+    // Static box collision
+    if FBoxCount > 0 then
+    begin
+      CellX := Trunc(PosX * FBoxGridInvCellSize);
+      CellY := Trunc(PosY * FBoxGridInvCellSize);
+
+      if CellX < 0 then CellX := 0;
+      if CellY < 0 then CellY := 0;
+      if CellX >= FBoxGridWidth then CellX := FBoxGridWidth - 1;
+      if CellY >= FBoxGridHeight then CellY := FBoxGridHeight - 1;
+
+      CellIdx := CellY * FBoxGridWidth + CellX;
+      Cell := @FBoxGrid[CellIdx];
+
+      for K := 0 to Cell^.Count - 1 do
+        CollideAABBBoxSoA(I, Cell^.Boxes[K]);
+    end;
+  end;
+end;
+
+procedure TPhyWorld.CollideAABBBoxSoA(I: Integer; Box: PPhyBox);
+var
+  MinX1, MaxX1, MinY1, MaxY1: Single;
+  OverlapX, OverlapY, Overlap: Single;
+  NX, NY: Single;
+begin
+  MinX1 := FAABBs.PosX[I] - FAABBs.HalfW[I];
+  MaxX1 := FAABBs.PosX[I] + FAABBs.HalfW[I];
+  MinY1 := FAABBs.PosY[I] - FAABBs.HalfH[I];
+  MaxY1 := FAABBs.PosY[I] + FAABBs.HalfH[I];
+
+  // AABB overlap test
+  if (MaxX1 < Box^.MinX) or (MinX1 > Box^.MaxX) or
+     (MaxY1 < Box^.MinY) or (MinY1 > Box^.MaxY) then
+    Exit;
+
+  // Compute overlap
+  if FAABBs.PosX[I] < (Box^.MinX + Box^.MaxX) * 0.5 then
+    OverlapX := MaxX1 - Box^.MinX
+  else
+    OverlapX := Box^.MaxX - MinX1;
+
+  if FAABBs.PosY[I] < (Box^.MinY + Box^.MaxY) * 0.5 then
+    OverlapY := MaxY1 - Box^.MinY
+  else
+    OverlapY := Box^.MaxY - MinY1;
+
+  // Push along minimum overlap axis
+  if OverlapX < OverlapY then
+  begin
+    Overlap := OverlapX;
+    if FAABBs.PosX[I] < (Box^.MinX + Box^.MaxX) * 0.5 then
+    begin NX := -1; NY := 0; end
+    else
+    begin NX := 1; NY := 0; end;
+  end
+  else
+  begin
+    Overlap := OverlapY;
+    if FAABBs.PosY[I] < (Box^.MinY + Box^.MaxY) * 0.5 then
+    begin NX := 0; NY := -1; end
+    else
+    begin NX := 0; NY := 1; end;
+  end;
+
+  FAABBs.PosX[I] := FAABBs.PosX[I] + NX * Overlap;
+  FAABBs.PosY[I] := FAABBs.PosY[I] + NY * Overlap;
+end;
+
 procedure TPhyWorld.Clear;
 begin
   FParticleCount := 0;
+  FAABBCount := 0;
   FBoxCount := 0;
   FConstraintCount := 0;
 end;
@@ -728,6 +1253,52 @@ end;
 function TPhyWorld.GetOldPosY(Index: Integer): Single;
 begin
   Result := FParticles.OldPosY[Index];
+end;
+
+function TPhyWorld.GetAABB(Index: Integer): PPhyAABB;
+begin
+  FTempAABB.PosX := FAABBs.PosX[Index];
+  FTempAABB.PosY := FAABBs.PosY[Index];
+  FTempAABB.OldPosX := FAABBs.OldPosX[Index];
+  FTempAABB.OldPosY := FAABBs.OldPosY[Index];
+  FTempAABB.AccelX := FAABBs.AccelX[Index];
+  FTempAABB.AccelY := FAABBs.AccelY[Index];
+  FTempAABB.HalfW := FAABBs.HalfW[Index];
+  FTempAABB.HalfH := FAABBs.HalfH[Index];
+  FTempAABB.InvMass := FAABBs.InvMass[Index];
+  FTempAABB.Restitution := FAABBs.Restitution[Index];
+  FTempAABB.Flags := FAABBs.Flags[Index];
+  Result := @FTempAABB;
+end;
+
+function TPhyWorld.GetAABBPosX(Index: Integer): Single;
+begin
+  Result := FAABBs.PosX[Index];
+end;
+
+function TPhyWorld.GetAABBPosY(Index: Integer): Single;
+begin
+  Result := FAABBs.PosY[Index];
+end;
+
+function TPhyWorld.GetAABBOldPosX(Index: Integer): Single;
+begin
+  Result := FAABBs.OldPosX[Index];
+end;
+
+function TPhyWorld.GetAABBOldPosY(Index: Integer): Single;
+begin
+  Result := FAABBs.OldPosY[Index];
+end;
+
+function TPhyWorld.GetAABBHalfW(Index: Integer): Single;
+begin
+  Result := FAABBs.HalfW[Index];
+end;
+
+function TPhyWorld.GetAABBHalfH(Index: Integer): Single;
+begin
+  Result := FAABBs.HalfH[Index];
 end;
 
 end.

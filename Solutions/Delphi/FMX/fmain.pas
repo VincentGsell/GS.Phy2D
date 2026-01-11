@@ -7,24 +7,27 @@ uses
   System.Diagnostics,
   FMX.Types, FMX.Controls, FMX.Forms, FMX.Graphics, FMX.Dialogs, FMX.SpinBox,
   FMX.Controls.Presentation, FMX.StdCtrls, FMX.Layouts,
-  GS.Phy.Vec2, GS.Phy.Types, GS.Phy.World,
+  GS.Phy.Vec2, GS.Phy.Types, GS.Phy.AABB, GS.Phy.World,
   GS.Phy.Renderer, GS.Phy.Renderer.FMX,
-  FMX.Edit, FMX.EditBox, FMX.ActnList;
+  FMX.Edit, FMX.EditBox, FMX.ActnList, FMX.Objects;
 
 type
   TFormGSPhy = class(TForm)
     TimerPhysics: TTimer;
-    PanelControls: TPanel;
+    Selection1: TSelection;
+    Rectangle1: TRectangle;
     ButtonAddBalls: TButton;
-    ButtonAddBoxes: TButton;
-    LabelBallCount: TLabel;
+    ButtonAddAABBs: TButton;
+    Label1: TLabel;
     LabelFPS: TLabel;
-    LabelIterations: TLabel;
-    SpinBoxIterations: TSpinBox;
-    LabelDamping: TLabel;
-    TrackBarDamping: TTrackBar;
     LabelRestitution: TLabel;
     TrackBarRestitution: TTrackBar;
+    TrackBarDamping: TTrackBar;
+    LabelDamping: TLabel;
+    LabelIterations: TLabel;
+    SpinBoxIterations: TSpinBox;
+    ButtonAddBoxes: TButton;
+    LabelBallCount: TLabel;
     procedure FormCreate(Sender: TObject);
     procedure FormDestroy(Sender: TObject);
     procedure FormPaint(Sender: TObject; Canvas: TCanvas; const ARect: TRectF);
@@ -32,6 +35,7 @@ type
     procedure TimerPhysicsTimer(Sender: TObject);
     procedure ButtonAddBallsClick(Sender: TObject);
     procedure ButtonAddBoxesClick(Sender: TObject);
+    procedure ButtonAddAABBsClick(Sender: TObject);
     procedure SpinBoxIterationsChange(Sender: TObject);
     procedure TrackBarDampingChange(Sender: TObject);
     procedure TrackBarRestitutionChange(Sender: TObject);
@@ -42,11 +46,11 @@ type
     FStopwatch: TStopwatch;
     FFrameCount: Integer;
     FLastFPSUpdate: Int64;
-    FBallCount: Integer;
     procedure CreateFrame;
     procedure UpdateFrame;
     procedure SpawnBalls(Count: Integer);
     procedure SpawnBoxes(Count: Integer);
+    procedure SpawnAABBs(Count: Integer);
     procedure RenderWorld;
   end;
 
@@ -65,7 +69,6 @@ const
 procedure TFormGSPhy.FormCreate(Sender: TObject);
 begin
   FFrameCreated := False;
-  FBallCount := 0;
 
   FWorld := TPhyWorld.Create;
   FWorld.SetGravity(0, 800);
@@ -103,12 +106,8 @@ begin
   H := ClientHeight;
 
   FWorld.Clear;
-  FBallCount := 0;
-
   FWorld.SetWorldBounds(W, H);
   FFrameCreated := True;
-
-  LabelBallCount.Text := 'Balls: 0';
 end;
 
 procedure TFormGSPhy.UpdateFrame;
@@ -138,10 +137,7 @@ begin
     Radius := BALL_RADIUS_MIN + Random * (BALL_RADIUS_MAX - BALL_RADIUS_MIN);
 
     FWorld.AddParticle(X, Y, Radius, False, 1.0, 0.5);
-    Inc(FBallCount);
   end;
-
-  LabelBallCount.Text := 'Balls: ' + IntToStr(FBallCount);
 end;
 
 procedure TFormGSPhy.SpawnBoxes(Count: Integer);
@@ -172,13 +168,12 @@ end;
 procedure TFormGSPhy.TimerPhysicsTimer(Sender: TObject);
 var
   ElapsedMs: Int64;
+  TotalDynamic: Integer;
 begin
   TimerPhysics.Enabled := False;
   try
-    //forward !
     FWorld.Step(1.0 / 60.0);
 
-    //FPS
     Inc(FFrameCount);
     ElapsedMs := FStopwatch.ElapsedMilliseconds;
     if ElapsedMs - FLastFPSUpdate >= 500 then
@@ -186,6 +181,11 @@ begin
       LabelFPS.Text := Format('FPS: %.1f', [FFrameCount * 1000 / (ElapsedMs - FLastFPSUpdate)]);
       FFrameCount := 0;
       FLastFPSUpdate := ElapsedMs;
+
+      // Update counters
+      TotalDynamic := FWorld.ParticleCount + FWorld.AABBCount;
+      Label1.Text := Format('Particles: %d', [TotalDynamic]);
+      LabelBallCount.Text := Format('Balls: %d / AABB: %d', [FWorld.ParticleCount, FWorld.AABBCount]);
     end;
 
     Invalidate;
@@ -202,6 +202,36 @@ end;
 procedure TFormGSPhy.ButtonAddBoxesClick(Sender: TObject);
 begin
   SpawnBoxes(50);
+end;
+
+procedure TFormGSPhy.ButtonAddAABBsClick(Sender: TObject);
+begin
+  SpawnAABBs(50);
+end;
+
+procedure TFormGSPhy.SpawnAABBs(Count: Integer);
+const
+  AABB_MIN_SIZE = 10;
+  AABB_MAX_SIZE = 30;
+var
+  I: Integer;
+  X, Y, W, H: Single;
+  SpawnLeft, SpawnRight, SpawnTop, SpawnBottom: Single;
+begin
+  SpawnLeft := AABB_MAX_SIZE + 10;
+  SpawnRight := ClientWidth - AABB_MAX_SIZE - 10;
+  SpawnTop := AABB_MAX_SIZE + 10;
+  SpawnBottom := ClientHeight / 3;
+
+  for I := 0 to Count - 1 do
+  begin
+    X := SpawnLeft + Random * (SpawnRight - SpawnLeft);
+    Y := SpawnTop + Random * (SpawnBottom - SpawnTop);
+    W := AABB_MIN_SIZE + Random * (AABB_MAX_SIZE - AABB_MIN_SIZE);
+    H := AABB_MIN_SIZE + Random * (AABB_MAX_SIZE - AABB_MIN_SIZE);
+
+    FWorld.AddAABB(X, Y, W, H, False, 1.0, 0.5);
+  end;
 end;
 
 procedure TFormGSPhy.SpinBoxIterationsChange(Sender: TObject);
@@ -247,27 +277,28 @@ var
   I: Integer;
   Box: PPhyBox;
   PosX, PosY, OldPosX, OldPosY, Radius: Single;
+  HalfW, HalfH: Single;
   VelX, VelY: Single;
-  ParticleColor: TPhyColor;
+  ObjColor: TPhyColor;
   W, H: Single;
 begin
   W := FRenderer.Width;
   H := FRenderer.Height;
 
-  // Bordures du monde
+  // World borders
   FRenderer.FillRect(0, 0, W, 2, TPhyColors.LightGray);
   FRenderer.FillRect(0, H - 2, W, H, TPhyColors.LightGray);
   FRenderer.FillRect(0, 0, 2, H, TPhyColors.LightGray);
   FRenderer.FillRect(W - 2, 0, W, H, TPhyColors.LightGray);
 
-  // Boxes statiques
+  // Static boxes
   for I := 0 to FWorld.BoxCount - 1 do
   begin
     Box := FWorld.GetBox(I);
     FRenderer.FillRect(Box^.MinX, Box^.MinY, Box^.MaxX, Box^.MaxY, TPhyColors.Gray);
   end;
 
-  // Particules avec couleur selon velocite
+  // Particles with velocity color
   for I := 0 to FWorld.ParticleCount - 1 do
   begin
     PosX := FWorld.GetPosX(I);
@@ -276,14 +307,28 @@ begin
     OldPosY := FWorld.GetOldPosY(I);
     Radius := FWorld.GetRadius(I);
 
-    // Velocite Verlet: V = Pos - OldPos
     VelX := PosX - OldPosX;
     VelY := PosY - OldPosY;
+    ObjColor := FRenderer.VelocityToColor(VelX, VelY);
 
-    ParticleColor := FRenderer.VelocityToColor(VelX, VelY);
+    FRenderer.FillCircle(PosX, PosY, Radius, ObjColor);
+  end;
 
-    FRenderer.FillCircle(PosX, PosY, Radius, ParticleColor);
-    //FRenderer.DrawCircle(PosX, PosY, Radius, TPhyColors.Black, 2.0);
+  // Dynamic AABBs with velocity color
+  for I := 0 to FWorld.AABBCount - 1 do
+  begin
+    PosX := FWorld.GetAABBPosX(I);
+    PosY := FWorld.GetAABBPosY(I);
+    OldPosX := FWorld.GetAABBOldPosX(I);
+    OldPosY := FWorld.GetAABBOldPosY(I);
+    HalfW := FWorld.GetAABBHalfW(I);
+    HalfH := FWorld.GetAABBHalfH(I);
+
+    VelX := PosX - OldPosX;
+    VelY := PosY - OldPosY;
+    ObjColor := FRenderer.VelocityToColor(VelX, VelY);
+
+    FRenderer.FillRect(PosX - HalfW, PosY - HalfH, PosX + HalfW, PosY + HalfH, ObjColor);
   end;
 end;
 

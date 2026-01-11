@@ -276,6 +276,7 @@
         <DCCReference Include="..\..\..\Sources\GS.Phy.World.pas"/>
         <DCCReference Include="..\..\..\Sources\GS.Phy.Renderer.FMX.pas"/>
         <DCCReference Include="..\..\..\Sources\GS.Phy.Renderer.pas"/>
+        <DCCReference Include="..\..\..\Sources\GS.Phy.AABB.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
         </BuildConfiguration>

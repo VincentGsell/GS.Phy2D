@@ -9,7 +9,8 @@ uses
   GS.Phy.SpatialHash in '..\..\..\Sources\GS.Phy.SpatialHash.pas',
   GS.Phy.World in '..\..\..\Sources\GS.Phy.World.pas',
   GS.Phy.Renderer.FMX in '..\..\..\Sources\GS.Phy.Renderer.FMX.pas',
-  GS.Phy.Renderer in '..\..\..\Sources\GS.Phy.Renderer.pas';
+  GS.Phy.Renderer in '..\..\..\Sources\GS.Phy.Renderer.pas',
+  GS.Phy.AABB in '..\..\..\Sources\GS.Phy.AABB.pas';
 
 {$R *.res}
 
