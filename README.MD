@@ -5,6 +5,11 @@ Since APE repo, I'll trying to work on a more optimized 2d physics stuff, here i
 
 ## History : 
 
+2026-01-21 - Compound constraint.
+
+![Alt text](/assets/gsPhy2DDemo1CompoundConstraint.png "Compound")
+
+
 2026-01-11 - change GUI - AABB fynamic - OBB R&D
 
 2026-01-09 - AABB Static - Circle shape - Optimisation
