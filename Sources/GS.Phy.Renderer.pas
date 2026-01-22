@@ -30,16 +30,16 @@ unit GS.Phy.Renderer;
 interface
 
 type
-  // Couleur ARGB 32 bits
+  // 32-bit ARGB color
   TPhyColor = Cardinal;
 
-  // Classe abstraite de renderer
+  // Abstract renderer class
   TPhyRenderer = class abstract
   private
     FWidth, FHeight: Single;
-    FMaxSpeed: Single;  // Pour le calcul des couleurs de velocite
+    FMaxSpeed: Single;  // For velocity color calculation
   protected
-    // Methodes abstraites a implementer par les classes derivees
+    // Abstract methods to be implemented by derived classes
     procedure DoBeginRender; virtual; abstract;
     procedure DoEndRender; virtual; abstract;
     procedure DoClear(Color: TPhyColor); virtual; abstract;
@@ -47,23 +47,29 @@ type
     procedure DoDrawCircle(X, Y, Radius: Single; Color: TPhyColor; Thickness: Single); virtual; abstract;
     procedure DoFillRect(MinX, MinY, MaxX, MaxY: Single; Color: TPhyColor); virtual; abstract;
     procedure DoDrawRect(MinX, MinY, MaxX, MaxY: Single; Color: TPhyColor; Thickness: Single); virtual; abstract;
+    procedure DoFillRotatedRect(CX, CY, HalfW, HalfH, Angle: Single; Color: TPhyColor); virtual; abstract;
+    procedure DoDrawRotatedRect(CX, CY, HalfW, HalfH, Angle: Single; Color: TPhyColor; Thickness: Single); virtual; abstract;
+    procedure DoDrawLine(X1, Y1, X2, Y2: Single; Color: TPhyColor; Thickness: Single); virtual; abstract;
   public
     constructor Create;
     destructor Destroy; override;
 
-    // Interface publique
+    // Public interface
     procedure BeginRender;
     procedure EndRender;
     procedure Clear(Color: TPhyColor);
     procedure SetSize(Width, Height: Single);
 
-    // Primitives de dessin
+    // Drawing primitives
     procedure FillCircle(X, Y, Radius: Single; Color: TPhyColor);
     procedure DrawCircle(X, Y, Radius: Single; Color: TPhyColor; Thickness: Single = 1.0);
     procedure FillRect(MinX, MinY, MaxX, MaxY: Single; Color: TPhyColor);
     procedure DrawRect(MinX, MinY, MaxX, MaxY: Single; Color: TPhyColor; Thickness: Single = 1.0);
+    procedure FillRotatedRect(CX, CY, HalfW, HalfH, Angle: Single; Color: TPhyColor);
+    procedure DrawRotatedRect(CX, CY, HalfW, HalfH, Angle: Single; Color: TPhyColor; Thickness: Single = 1.0);
+    procedure DrawLine(X1, Y1, X2, Y2: Single; Color: TPhyColor; Thickness: Single = 1.0);
 
-    // Utilitaire: calcule la couleur d'une particule selon sa velocite
+    // Utility: computes particle color based on velocity
     function VelocityToColor(VelX, VelY: Single): TPhyColor;
 
     property Width: Single read FWidth;
@@ -71,7 +77,7 @@ type
     property MaxSpeed: Single read FMaxSpeed write FMaxSpeed;
   end;
 
-  // Couleurs predefinies (format ARGB)
+  // Predefined colors (ARGB format)
   TPhyColors = class
   public const
     White     = TPhyColor($FFFFFFFF);
@@ -84,7 +90,7 @@ type
     Magenta   = TPhyColor($FFFF00FF);
     Gray      = TPhyColor($FF808080);
     LightGray = TPhyColor($FFD3D3D3);
-    DarkGray  = TPhyColor($FF404040);
+    DarkGray  = TPhyColor($FF4040FF);
   end;
 
 implementation
@@ -143,6 +149,21 @@ begin
   DoDrawRect(MinX, MinY, MaxX, MaxY, Color, Thickness);
 end;
 
+procedure TPhyRenderer.FillRotatedRect(CX, CY, HalfW, HalfH, Angle: Single; Color: TPhyColor);
+begin
+  DoFillRotatedRect(CX, CY, HalfW, HalfH, Angle, Color);
+end;
+
+procedure TPhyRenderer.DrawRotatedRect(CX, CY, HalfW, HalfH, Angle: Single; Color: TPhyColor; Thickness: Single);
+begin
+  DoDrawRotatedRect(CX, CY, HalfW, HalfH, Angle, Color, Thickness);
+end;
+
+procedure TPhyRenderer.DrawLine(X1, Y1, X2, Y2: Single; Color: TPhyColor; Thickness: Single);
+begin
+  DoDrawLine(X1, Y1, X2, Y2, Color, Thickness);
+end;
+
 function TPhyRenderer.VelocityToColor(VelX, VelY: Single): TPhyColor;
 var
   Speed, SpeedNorm: Single;
@@ -152,7 +173,7 @@ begin
   SpeedNorm := Speed / FMaxSpeed;
   if SpeedNorm > 1.0 then SpeedNorm := 1.0;
 
-  // Gradient: Bleu -> Cyan -> Vert -> Jaune -> Rouge
+  // Gradient: Blue -> Cyan -> Green -> Yellow -> Red
   if SpeedNorm < 0.25 then
   begin
     R := 0;

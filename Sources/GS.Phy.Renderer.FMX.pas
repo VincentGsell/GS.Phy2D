@@ -29,6 +29,8 @@ interface
 uses
   System.Types,
   System.UITypes,
+  System.Math,
+  System.Math.Vectors,
   FMX.Graphics,
   GS.Phy.Renderer,
   GS.Phy.World;
@@ -46,11 +48,14 @@ type
     procedure DoDrawCircle(X, Y, Radius: Single; Color: TPhyColor; Thickness: Single); override;
     procedure DoFillRect(MinX, MinY, MaxX, MaxY: Single; Color: TPhyColor); override;
     procedure DoDrawRect(MinX, MinY, MaxX, MaxY: Single; Color: TPhyColor; Thickness: Single); override;
+    procedure DoFillRotatedRect(CX, CY, HalfW, HalfH, Angle: Single; Color: TPhyColor); override;
+    procedure DoDrawRotatedRect(CX, CY, HalfW, HalfH, Angle: Single; Color: TPhyColor; Thickness: Single); override;
+    procedure DoDrawLine(X1, Y1, X2, Y2: Single; Color: TPhyColor; Thickness: Single); override;
   public
     constructor Create;
     destructor Destroy; override;
 
-    // Definir le canvas FMX cible
+    // Set target FMX canvas
     procedure SetCanvas(Canvas: TCanvas);
 
     property Canvas: TCanvas read FCanvas;
@@ -143,6 +148,70 @@ begin
     FCanvas.Stroke.Thickness := Thickness;
     Rect := RectF(MinX, MinY, MaxX, MaxY);
     FCanvas.DrawRect(Rect, 0, 0, [], 1.0);
+  end;
+end;
+
+procedure TPhyRendererFMX.DoFillRotatedRect(CX, CY, HalfW, HalfH, Angle: Single; Color: TPhyColor);
+var
+  SavedMatrix: TMatrix;
+  Rect: TRectF;
+begin
+  if FSceneActive and (FCanvas <> nil) then
+  begin
+    // Save current transformation
+    SavedMatrix := FCanvas.Matrix;
+
+    // Apply rotation around center
+    FCanvas.SetMatrix(
+      TMatrix.CreateTranslation(-CX, -CY) *
+      TMatrix.CreateRotation(Angle) *
+      TMatrix.CreateTranslation(CX, CY) *
+      SavedMatrix
+    );
+
+    // Draw rectangle at center
+    FCanvas.Fill.Color := TAlphaColor(Color);
+    Rect := RectF(CX - HalfW, CY - HalfH, CX + HalfW, CY + HalfH);
+    FCanvas.FillRect(Rect, 0, 0, [], 1.0);
+
+    // Restore transformation
+    FCanvas.SetMatrix(SavedMatrix);
+  end;
+end;
+
+procedure TPhyRendererFMX.DoDrawRotatedRect(CX, CY, HalfW, HalfH, Angle: Single; Color: TPhyColor; Thickness: Single);
+var
+  SavedMatrix: TMatrix;
+  Rect: TRectF;
+begin
+  if FSceneActive and (FCanvas <> nil) then
+  begin
+    SavedMatrix := FCanvas.Matrix;
+
+    FCanvas.SetMatrix(
+      TMatrix.CreateTranslation(-CX, -CY) *
+      TMatrix.CreateRotation(Angle) *
+      TMatrix.CreateTranslation(CX, CY) *
+      SavedMatrix
+    );
+
+    FCanvas.Stroke.Color := TAlphaColor(Color);
+    FCanvas.Stroke.Thickness := Thickness;
+    Rect := RectF(CX - HalfW, CY - HalfH, CX + HalfW, CY + HalfH);
+    FCanvas.DrawRect(Rect, 0, 0, [], 1.0);
+
+    FCanvas.SetMatrix(SavedMatrix);
+  end;
+end;
+
+procedure TPhyRendererFMX.DoDrawLine(X1, Y1, X2, Y2: Single; Color: TPhyColor; Thickness: Single);
+begin
+  if FSceneActive and (FCanvas <> nil) then
+  begin
+    FCanvas.Stroke.Kind := TBrushKind.Solid;
+    FCanvas.Stroke.Color := TAlphaColor(Color);
+    FCanvas.Stroke.Thickness := Thickness;
+    FCanvas.DrawLine(PointF(X1, Y1), PointF(X2, Y2), 1.0);
   end;
 end;
 

@@ -27,10 +27,10 @@ unit GS.Phy.Types;
 {$MODE DELPHI}
 {$ENDIF}
 
-// Optimisations de compilation
-{$O+}  // Optimisations activees
-{$R-}  // Range checking desactive
-{$Q-}  // Overflow checking desactive
+// Compiler optimizations
+{$O+}  // Optimizations enabled
+{$R-}  // Range checking disabled
+{$Q-}  // Overflow checking disabled
 
 interface
 
@@ -42,32 +42,41 @@ const
   PHY_FLAG_COLLIDABLE = 2;
 
 type
-  // Particule : record compact, pas de classe
+  // Particle: compact record, no class
   TPhyParticle = record
-    Pos: TVec2;        // Position actuelle
-    OldPos: TVec2;     // Position precedente (Verlet)
-    Accel: TVec2;      // Acceleration accumulee
-    Radius: Single;    // Rayon de collision
-    InvMass: Single;   // 1/masse (0 = fixe)
-    Restitution: Single; // Elasticite (0-1)
+    Pos: TVec2;        // Current position
+    OldPos: TVec2;     // Previous position (Verlet)
+    Accel: TVec2;      // Accumulated acceleration
+    Radius: Single;    // Collision radius
+    InvMass: Single;   // 1/mass (0 = fixed)
+    Restitution: Single; // Elasticity (0-1)
     Flags: Byte;       // PHY_FLAG_*
   end;
   PPhyParticle = ^TPhyParticle;
 
-  // Contrainte distance entre 2 particules
+  // Distance constraint between 2 particles
   TPhyConstraint = record
-    P1, P2: Integer;   // Indices des particules
+    P1, P2: Integer;   // Particle indices
     RestLength: Single;
     Stiffness: Single; // 0-1
   end;
   PPhyConstraint = ^TPhyConstraint;
 
-  // Box statique (mur)
+  // Static box (wall)
   TPhyBox = record
     MinX, MinY, MaxX, MaxY: Single;
     Restitution: Single;
   end;
   PPhyBox = ^TPhyBox;
+
+  // Rigid body: group of particles forming a single object
+  TPhyRigidBody = record
+    ParticleStart: Integer;  // First particle index
+    ParticleCount: Integer;  // Number of particles in this body
+    ConstraintStart: Integer; // First constraint index
+    ConstraintCount: Integer; // Number of constraints
+  end;
+  PPhyRigidBody = ^TPhyRigidBody;
 
 function CreateParticle(X, Y, Radius: Single; Fixed: Boolean = False; Mass: Single = 1.0; Restitution: Single = 0.5): TPhyParticle;
 function CreateBox(X, Y, Width, Height: Single; Restitution: Single = 0.3): TPhyBox;

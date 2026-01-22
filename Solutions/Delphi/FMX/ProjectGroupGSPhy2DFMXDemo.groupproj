@@ -1,0 +1,48 @@
+﻿<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+    <PropertyGroup>
+        <ProjectGuid>{8F2BD654-A2C8-4F95-A127-DE7EF844AC69}</ProjectGuid>
+    </PropertyGroup>
+    <ItemGroup>
+        <Projects Include="GSPhy2DTestsCsl\GSPhy2DTestConsole.dproj">
+            <Dependencies/>
+        </Projects>
+        <Projects Include="GSPhy2DDemo\GSPhy2DDemo.dproj">
+            <Dependencies/>
+        </Projects>
+    </ItemGroup>
+    <ProjectExtensions>
+        <Borland.Personality>Default.Personality.12</Borland.Personality>
+        <Borland.ProjectType/>
+        <BorlandProject>
+            <Default.Personality/>
+        </BorlandProject>
+    </ProjectExtensions>
+    <Target Name="GSPhy2DTestConsole">
+        <MSBuild Projects="GSPhy2DTestsCsl\GSPhy2DTestConsole.dproj"/>
+    </Target>
+    <Target Name="GSPhy2DTestConsole:Clean">
+        <MSBuild Projects="GSPhy2DTestsCsl\GSPhy2DTestConsole.dproj" Targets="Clean"/>
+    </Target>
+    <Target Name="GSPhy2DTestConsole:Make">
+        <MSBuild Projects="GSPhy2DTestsCsl\GSPhy2DTestConsole.dproj" Targets="Make"/>
+    </Target>
+    <Target Name="GSPhy2DDemo">
+        <MSBuild Projects="GSPhy2DDemo\GSPhy2DDemo.dproj"/>
+    </Target>
+    <Target Name="GSPhy2DDemo:Clean">
+        <MSBuild Projects="GSPhy2DDemo\GSPhy2DDemo.dproj" Targets="Clean"/>
+    </Target>
+    <Target Name="GSPhy2DDemo:Make">
+        <MSBuild Projects="GSPhy2DDemo\GSPhy2DDemo.dproj" Targets="Make"/>
+    </Target>
+    <Target Name="Build">
+        <CallTarget Targets="GSPhy2DTestConsole;GSPhy2DDemo"/>
+    </Target>
+    <Target Name="Clean">
+        <CallTarget Targets="GSPhy2DTestConsole:Clean;GSPhy2DDemo:Clean"/>
+    </Target>
+    <Target Name="Make">
+        <CallTarget Targets="GSPhy2DTestConsole:Make;GSPhy2DDemo:Make"/>
+    </Target>
+    <Import Project="$(BDS)\Bin\CodeGear.Group.Targets" Condition="Exists('$(BDS)\Bin\CodeGear.Group.Targets')"/>
+</Project>

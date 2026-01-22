@@ -27,10 +27,10 @@ unit GS.Phy.Vec2;
 {$MODE DELPHI}
 {$ENDIF}
 
-// Optimisations de compilation
-{$O+}  // Optimisations activees
-{$R-}  // Range checking desactive
-{$Q-}  // Overflow checking desactive
+// Compiler optimizations
+{$O+}  // Optimizations enabled
+{$R-}  // Range checking disabled
+{$Q-}  // Overflow checking disabled
 
 interface
 
@@ -40,7 +40,14 @@ type
   end;
   PVec2 = ^TVec2;
 
+  // Vec3 for circle definitions (X, Y, Radius)
+  TVec3 = record
+    X, Y, Z: Single;
+  end;
+  PVec3 = ^TVec3;
+
 function Vec2(X, Y: Single): TVec2; inline;
+function Vec3(X, Y, Z: Single): TVec3; inline;
 function Vec2Add(const A, B: TVec2): TVec2; inline;
 function Vec2Sub(const A, B: TVec2): TVec2; inline;
 function Vec2Mul(const V: TVec2; S: Single): TVec2; inline;
@@ -48,7 +55,7 @@ function Vec2Dot(const A, B: TVec2): Single; inline;
 function Vec2LengthSq(const V: TVec2): Single; inline;
 function Vec2Length(const V: TVec2): Single; inline;
 function Vec2Normalize(const V: TVec2): TVec2; inline;
-function Vec2NormalizeFast(const V: TVec2): TVec2; inline;  // Version rapide
+function Vec2NormalizeFast(const V: TVec2): TVec2; inline;  // Fast version
 function Vec2Dist(const A, B: TVec2): Single; inline;
 function Vec2DistSq(const A, B: TVec2): Single; inline;
 function FastInvSqrt(X: Single): Single; inline;  // Quake III algorithm
@@ -59,6 +66,13 @@ function Vec2(X, Y: Single): TVec2;
 begin
   Result.X := X;
   Result.Y := Y;
+end;
+
+function Vec3(X, Y, Z: Single): TVec3;
+begin
+  Result.X := X;
+  Result.Y := Y;
+  Result.Z := Z;
 end;
 
 function Vec2Add(const A, B: TVec2): TVec2;
@@ -121,8 +135,8 @@ begin
   Result := Sqr(B.X - A.X) + Sqr(B.Y - A.Y);
 end;
 
-// Fast Inverse Square Root - Algorithme de Quake III (John Carmack)
-// Precision ~1% mais beaucoup plus rapide que 1/Sqrt(x)
+// Fast Inverse Square Root - Quake III algorithm (John Carmack)
+// ~1% precision but much faster than 1/Sqrt(x)
 function FastInvSqrt(X: Single): Single;
 var
   I: Integer;
@@ -130,14 +144,14 @@ var
 begin
   X2 := X * 0.5;
   Y := X;
-  I := PInteger(@Y)^;               // Reinterpreter float comme int
-  I := $5F3759DF - (I shr 1);       // Magic number (approximation initiale)
-  Y := PSingle(@I)^;                // Reinterpreter int comme float
-  Y := Y * (1.5 - (X2 * Y * Y));    // Une iteration de Newton-Raphson
+  I := PInteger(@Y)^;               // Reinterpret float as int
+  I := $5F3759DF - (I shr 1);       // Magic number (initial approximation)
+  Y := PSingle(@I)^;                // Reinterpret int as float
+  Y := Y * (1.5 - (X2 * Y * Y));    // One Newton-Raphson iteration
   Result := Y;
 end;
 
-// Normalisation rapide utilisant FastInvSqrt
+// Fast normalization using FastInvSqrt
 function Vec2NormalizeFast(const V: TVec2): TVec2;
 var
   LenSq, InvLen: Single;

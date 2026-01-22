@@ -27,10 +27,10 @@ unit GS.Phy.SpatialHash;
 {$MODE DELPHI}
 {$ENDIF}
 
-// Optimisations de compilation
-{$O+}  // Optimisations activees
-{$R-}  // Range checking desactive
-{$Q-}  // Overflow checking desactive
+// Compiler optimizations
+{$O+}  // Optimizations enabled
+{$R-}  // Range checking disabled
+{$Q-}  // Overflow checking disabled
 
 interface
 
@@ -46,12 +46,12 @@ type
     FGridHeight: Integer;
     FOffsetX, FOffsetY: Single;
 
-    // Grille : chaque cellule contient des pointeurs vers les particules
-    FCells: array of array of Pointer;  // Pointeurs directs - elimine l'indirection
+    // Grid: each cell contains pointers to particles
+    FCells: array of array of Pointer;  // Direct pointers - eliminates indirection
     FCellCounts: array of Integer;
     FCellCapacity: Integer;
 
-    // Pour les queries - stocke des pointeurs
+    // For queries - stores pointers
     FQueryResult: array of Pointer;
     FQueryCount: Integer;
 
@@ -63,7 +63,7 @@ type
     procedure Setup(WorldWidth, WorldHeight, CellSize: Single);
     procedure Clear;
     procedure Insert(Ptr: Pointer; X, Y, Radius: Single);
-    function Query(SelfPtr: Pointer; X, Y, Radius: Single): Integer; // Retourne le nombre de resultats
+    function Query(SelfPtr: Pointer; X, Y, Radius: Single): Integer; // Returns result count
     function GetQueryResult(I: Integer): Pointer; inline;
 
     property CellSize: Single read FCellSize;
@@ -73,8 +73,8 @@ implementation
 
 const
   INITIAL_CELL_CAPACITY = 16;
-  MAX_CELL_CAPACITY = 64;   // Capacite max par cellule (evite reallocations)
-  MAX_QUERY_RESULTS = 256;  // Capacite fixe pour eviter les allocations
+  MAX_CELL_CAPACITY = 64;   // Max capacity per cell (avoids reallocations)
+  MAX_QUERY_RESULTS = 256;  // Fixed capacity to avoid allocations
 
 constructor TPhySpatialHash.Create;
 begin
@@ -82,7 +82,7 @@ begin
   FCellSize := 32;
   FInvCellSize := 1 / FCellSize;
   FCellCapacity := INITIAL_CELL_CAPACITY;
-  // Pre-allouer le buffer de resultats une seule fois
+  // Pre-allocate result buffer once
   SetLength(FQueryResult, MAX_QUERY_RESULTS);
 end;
 
@@ -106,11 +106,11 @@ begin
 
   TotalCells := FGridWidth * FGridHeight;
 
-  // Allouer la grille une seule fois avec capacite fixe
+  // Allocate grid once with fixed capacity
   SetLength(FCells, TotalCells, MAX_CELL_CAPACITY);
   SetLength(FCellCounts, TotalCells);
 
-  // Remplir a zero
+  // Fill with zeros
   for I := 0 to TotalCells - 1 do
     FCellCounts[I] := 0;
 end;
@@ -136,7 +136,7 @@ var
   MinCX, MinCY, MaxCX, MaxCY: Integer;
   CX, CY, CellIdx, Count: Integer;
 begin
-  // Calculer les cellules couvertes par le cercle
+  // Compute cells covered by the circle
   GetCellIndex(X - Radius, Y - Radius, MinCX, MinCY);
   GetCellIndex(X + Radius, Y + Radius, MaxCX, MaxCY);
 
@@ -146,17 +146,17 @@ begin
   if MaxCX >= FGridWidth then MaxCX := FGridWidth - 1;
   if MaxCY >= FGridHeight then MaxCY := FGridHeight - 1;
 
-  // Inserer dans toutes les cellules couvertes
+  // Insert into all covered cells
   for CY := MinCY to MaxCY do
     for CX := MinCX to MaxCX do
     begin
       CellIdx := CY * FGridWidth + CX;
       Count := FCellCounts[CellIdx];
 
-      // Capacite fixe - ignorer si plein (rare avec bonne taille de cellule)
+      // Fixed capacity - ignore if full (rare with good cell size)
       if Count < MAX_CELL_CAPACITY then
       begin
-        FCells[CellIdx][Count] := Ptr;  // Stocker le pointeur directement
+        FCells[CellIdx][Count] := Ptr;  // Store pointer directly
         Inc(FCellCounts[CellIdx]);
       end;
     end;
@@ -170,7 +170,7 @@ var
 begin
   FQueryCount := 0;
 
-  // Calculer les cellules a interroger
+  // Compute cells to query
   GetCellIndex(X - Radius, Y - Radius, MinCX, MinCY);
   GetCellIndex(X + Radius, Y + Radius, MaxCX, MaxCY);
 
@@ -180,7 +180,7 @@ begin
   if MaxCX >= FGridWidth then MaxCX := FGridWidth - 1;
   if MaxCY >= FGridHeight then MaxCY := FGridHeight - 1;
 
-  // Parcourir les cellules
+  // Iterate cells
   for CY := MinCY to MaxCY do
     for CX := MinCX to MaxCX do
     begin
@@ -191,10 +191,10 @@ begin
       begin
         Ptr := FCells[CellIdx][I];
 
-        // Ne pas retourner soi-meme, et eviter les doublons (pointeur plus grand)
+        // Don't return self, avoid duplicates (larger pointer only)
         if NativeUInt(Ptr) > NativeUInt(SelfPtr) then
         begin
-          // Buffer pre-alloue - ignorer si plein (rare en pratique)
+          // Pre-allocated buffer - ignore if full (rare in practice)
           if FQueryCount < MAX_QUERY_RESULTS then
           begin
             FQueryResult[FQueryCount] := Ptr;

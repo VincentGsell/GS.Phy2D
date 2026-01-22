@@ -1,0 +1,216 @@
+object FormGSPhy: TFormGSPhy
+  Left = 0
+  Top = 0
+  Caption = 'GSPhy2D Demo'
+  ClientHeight = 639
+  ClientWidth = 1152
+  FormFactor.Width = 320
+  FormFactor.Height = 480
+  FormFactor.Devices = [Desktop]
+  OnCreate = FormCreate
+  OnDestroy = FormDestroy
+  OnMouseDown = FormMouseDown
+  OnMouseMove = FormMouseMove
+  OnMouseUp = FormMouseUp
+  OnResize = FormResize
+  OnPaint = FormPaint
+  DesignerMasterStyle = 0
+  object TimerInvalidate: TTimer
+    Interval = 1
+    OnTimer = TimerInvalidateTimer
+    Left = 112
+    Top = 24
+  end
+  object Selection1: TSelection
+    ClipChildren = True
+    GripSize = 3.000000000000000000
+    HideSelection = False
+    Proportional = False
+    Position.X = 25.000000000000000000
+    Position.Y = 96.000000000000000000
+    Size.Width = 200.000000000000000000
+    Size.Height = 425.000000000000000000
+    Size.PlatformDefault = False
+    ShowHandles = True
+    object Rectangle1: TRectangle
+      Anchors = [akLeft, akTop, akRight, akBottom]
+      Fill.Color = claDarksalmon
+      HitTest = False
+      Opacity = 0.500000000000000000
+      Position.X = 8.000000000000000000
+      Position.Y = 8.000000000000000000
+      Size.Width = 184.000000000000000000
+      Size.Height = 409.000000000000000000
+      Size.PlatformDefault = False
+    end
+    object ButtonAddAABBs: TButton
+      Anchors = [akLeft, akTop, akRight]
+      Position.X = 8.000000000000000000
+      Position.Y = 155.000000000000000000
+      Size.Width = 184.000000000000000000
+      Size.Height = 32.000000000000000000
+      Size.PlatformDefault = False
+      TabOrder = 14
+      Text = 'Add 50 Rects AABB'
+      OnClick = ButtonAddAABBsClick
+    end
+    object ButtonAddBalls: TButton
+      Anchors = [akLeft, akTop, akRight]
+      Position.X = 8.000000000000000000
+      Position.Y = 114.000000000000000000
+      Size.Width = 184.000000000000000000
+      Size.Height = 33.000000000000000000
+      Size.PlatformDefault = False
+      TabOrder = 3
+      Text = 'Add 50 Balls'
+      OnClick = ButtonAddBallsClick
+    end
+    object ButtonAddBoxes: TButton
+      Anchors = [akLeft, akTop, akRight]
+      Position.X = 8.000000000000000000
+      Position.Y = 235.000000000000000000
+      Size.Width = 184.000000000000000000
+      Size.Height = 30.000000000000000000
+      Size.PlatformDefault = False
+      TabOrder = 1
+      Text = 'Add 50 Boxes (Static)'
+      OnClick = ButtonAddBoxesClick
+    end
+    object ButtonAddOBBs: TButton
+      Anchors = [akLeft, akTop, akRight]
+      Position.X = 8.000000000000000000
+      Position.Y = 195.000000000000000000
+      Size.Width = 184.000000000000000000
+      Size.Height = 32.000000000000000000
+      Size.PlatformDefault = False
+      TabOrder = 15
+      Text = 'Add Rect OBB'
+      OnClick = ButtonAddOBBsClick
+    end
+    object Label1: TLabel
+      Align = Top
+      Position.Y = 50.000000000000000000
+      Size.Width = 200.000000000000000000
+      Size.Height = 25.000000000000000000
+      Size.PlatformDefault = False
+      TextSettings.HorzAlign = Center
+      Text = 'Particles : 0'
+      TabOrder = 4
+    end
+    object LabelBallCount: TLabel
+      Align = Top
+      Position.Y = 75.000000000000000000
+      Size.Width = 200.000000000000000000
+      Size.Height = 24.000000000000000000
+      Size.PlatformDefault = False
+      TextSettings.HorzAlign = Center
+      Text = 'Balls: 0'
+      TabOrder = 0
+    end
+    object LabelDamping: TLabel
+      Position.X = 11.000000000000000000
+      Position.Y = 310.000000000000000000
+      Size.Width = 60.000000000000000000
+      Size.Height = 24.000000000000000000
+      Size.PlatformDefault = False
+      Text = 'Damp: 99%'
+      TabOrder = 9
+    end
+    object LabelFPS: TLabel
+      Align = Top
+      StyledSettings = [Family, Size, FontColor]
+      Position.Y = 33.000000000000000000
+      Size.Width = 200.000000000000000000
+      Size.Height = 17.000000000000000000
+      Size.PlatformDefault = False
+      TextSettings.Font.StyleExt = {00070000000000000004000000}
+      TextSettings.HorzAlign = Center
+      Text = 'FPS: 0'
+      TabOrder = 7
+    end
+    object LabelIterations: TLabel
+      Position.X = 11.000000000000000000
+      Position.Y = 279.000000000000000000
+      Size.Width = 48.000000000000000000
+      Size.Height = 24.000000000000000000
+      Size.PlatformDefault = False
+      Text = 'Iter: 2'
+      TabOrder = 5
+    end
+    object LabelRestitution: TLabel
+      Position.X = 11.000000000000000000
+      Position.Y = 339.000000000000000000
+      Size.Width = 60.000000000000000000
+      Size.Height = 24.000000000000000000
+      Size.PlatformDefault = False
+      Text = 'Rest: 30%'
+      TabOrder = 11
+    end
+    object SpinBoxIterations: TSpinBox
+      Touch.InteractiveGestures = [LongTap, DoubleTap]
+      Anchors = [akLeft, akTop, akRight]
+      TabOrder = 6
+      Cursor = crIBeam
+      Min = 1.000000000000000000
+      Max = 10.000000000000000000
+      Value = 2.000000000000000000
+      Position.X = 79.000000000000000000
+      Position.Y = 279.000000000000000000
+      Size.Width = 113.000000000000000000
+      Size.Height = 24.000000000000000000
+      Size.PlatformDefault = False
+      OnChange = SpinBoxIterationsChange
+    end
+    object TrackBarDamping: TTrackBar
+      Anchors = [akLeft, akTop, akRight]
+      CanParentFocus = True
+      Min = 80.000000000000000000
+      Orientation = Horizontal
+      Position.X = 79.000000000000000000
+      Position.Y = 317.000000000000000000
+      Size.Width = 113.000000000000000000
+      Size.Height = 19.000000000000000000
+      Size.PlatformDefault = False
+      TabOrder = 10
+      Value = 99.000000000000000000
+      OnChange = TrackBarDampingChange
+    end
+    object TrackBarRestitution: TTrackBar
+      Anchors = [akLeft, akTop, akRight]
+      CanParentFocus = True
+      Orientation = Horizontal
+      Position.X = 79.000000000000000000
+      Position.Y = 344.000000000000000000
+      Size.Width = 113.000000000000000000
+      Size.Height = 19.000000000000000000
+      Size.PlatformDefault = False
+      TabOrder = 12
+      Value = 30.000000000000000000
+      OnChange = TrackBarRestitutionChange
+    end
+    object Rectangle2: TRectangle
+      Align = Top
+      Fill.Color = claChocolate
+      HitTest = False
+      Margins.Left = 8.000000000000000000
+      Margins.Top = 5.000000000000000000
+      Margins.Right = 8.000000000000000000
+      Position.X = 8.000000000000000000
+      Position.Y = 5.000000000000000000
+      Size.Width = 184.000000000000000000
+      Size.Height = 28.000000000000000000
+      Size.PlatformDefault = False
+    end
+    object ButtonClear: TButton
+      Anchors = [akLeft, akTop, akRight]
+      Position.X = 8.000000000000000000
+      Position.Y = 371.000000000000000000
+      Size.Width = 184.000000000000000000
+      Size.Height = 33.000000000000000000
+      Size.PlatformDefault = False
+      TabOrder = 2
+      Text = 'Clear'
+      OnClick = ButtonClearClick
+    end
+  end
+end
