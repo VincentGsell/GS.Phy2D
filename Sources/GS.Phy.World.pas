@@ -75,10 +75,10 @@ type
     // Pour compatibilite avec GetParticle - cache temporaire
     FTempParticle: TPhyParticle;
 
-    FBoxes: array of TPhyBox;
+    FBoxes: TArray<TPhyBox>;
     FBoxCount: Integer;
 
-    FConstraints: array of TPhyConstraint;
+    FConstraints: TArray<TPhyConstraint>;
     FConstraintCount: Integer;
 
     FSpatialHash: TPhySpatialHash;
@@ -96,6 +96,8 @@ type
     FBoxGridCellSize: Single;
     FBoxGridInvCellSize: Single;
     FBoxGridDirty: Boolean;
+    FNeedToSetWorldBounds: Boolean;
+    FNeedToSetWorldBoundW, FNeedToSetWorldBoundH: Single;
 
     procedure GrowParticleArrays;
     procedure Integrate(DT: Single);
@@ -103,11 +105,13 @@ type
     procedure SolveConstraints;
     procedure SolveBoxCollisions;
     procedure CollideParticlesSoA(I, J: Integer);
-    procedure RebuildBoxGrid;
     procedure CollideParticleBoxSoA(I: Integer; Box: PPhyBox);
+    procedure InternalSetWorldBounds(Width, Height: Single);
   public
     constructor Create;
     destructor Destroy; override;
+    procedure RebuildBoxGrid;
+    procedure NeedRebuildBoxGrid;
 
     procedure SetWorldBounds(Width, Height: Single);
     procedure SetGravity(X, Y: Single);
@@ -137,6 +141,7 @@ type
     property ConstraintIterations: Integer read FConstraintIterations write FConstraintIterations;
     property Damping: Single read FDamping write FDamping;
     property Restitution: Single read FRestitution write FRestitution;
+    property Boxes: TArray<TPhyBox> read FBoxes write FBoxes;
   end;
 
 implementation
@@ -209,20 +214,10 @@ begin
 end;
 
 procedure TPhyWorld.SetWorldBounds(Width, Height: Single);
-var
-  MaxRadius: Single;
-  I: Integer;
 begin
-  FWorldWidth := Width;
-  FWorldHeight := Height;
-
-  MaxRadius := 10;
-  for I := 0 to FParticleCount - 1 do
-    if FParticles.Radius[I] > MaxRadius then
-      MaxRadius := FParticles.Radius[I];
-
-  FSpatialHash.Setup(Width, Height, MaxRadius * 2);
-  FBoxGridDirty := True;
+  FNeedToSetWorldBounds := True;
+  FNeedToSetWorldBoundW := Width;
+  FNeedToSetWorldBoundH := Height;
 end;
 
 procedure TPhyWorld.SetGravity(X, Y: Single);
@@ -297,6 +292,8 @@ procedure TPhyWorld.Step(DT: Single);
 var
   Iter: Integer;
 begin
+  if FNeedToSetWorldBounds then
+    InternalSetWorldBounds(FNeedToSetWorldBoundW, FNeedToSetWorldBoundH);
   Integrate(DT);
 
   for Iter := 0 to FCollisionIterations - 1 do
@@ -344,6 +341,29 @@ begin
     FParticles.AccelX[I] := 0;
     FParticles.AccelY[I] := 0;
   end;
+end;
+
+procedure TPhyWorld.InternalSetWorldBounds(Width, Height: Single);
+var
+  MaxRadius: Single;
+  I: Integer;
+begin
+  FNeedToSetWorldBounds := False;
+  FWorldWidth := Width;
+  FWorldHeight := Height;
+
+  MaxRadius := 10;
+  for I := 0 to FParticleCount - 1 do
+    if FParticles.Radius[I] > MaxRadius then
+      MaxRadius := FParticles.Radius[I];
+
+  FSpatialHash.Setup(Width, Height, MaxRadius * 2);
+  FBoxGridDirty := True;
+end;
+
+procedure TPhyWorld.NeedRebuildBoxGrid;
+begin
+  FBoxGridDirty := True;
 end;
 
 procedure TPhyWorld.SolveCollisions;

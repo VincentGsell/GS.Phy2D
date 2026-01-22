@@ -3,17 +3,20 @@ object FormGSPhy: TFormGSPhy
   Top = 0
   Caption = 'GSPhy2D Demo'
   ClientHeight = 639
-  ClientWidth = 1152
+  ClientWidth = 1108
   FormFactor.Width = 320
   FormFactor.Height = 480
   FormFactor.Devices = [Desktop]
   OnCreate = FormCreate
   OnDestroy = FormDestroy
+  OnMouseDown = FormMouseDown
+  OnMouseMove = FormMouseMove
+  OnMouseUp = FormMouseUp
   OnResize = FormResize
   OnPaint = FormPaint
   DesignerMasterStyle = 0
   object TimerPhysics: TTimer
-    Interval = 16
+    Interval = 5
     OnTimer = TimerPhysicsTimer
     Left = 32
     Top = 80
@@ -33,7 +36,6 @@ object FormGSPhy: TFormGSPhy
       Size.PlatformDefault = False
       TabOrder = 0
       Text = 'Add 50 Balls'
-      TextSettings.Trimming = None
       OnClick = ButtonAddBallsClick
     end
     object ButtonAddBoxes: TButton
@@ -44,7 +46,6 @@ object FormGSPhy: TFormGSPhy
       Size.PlatformDefault = False
       TabOrder = 1
       Text = 'Add 50 Boxes'
-      TextSettings.Trimming = None
       OnClick = ButtonAddBoxesClick
     end
     object LabelBallCount: TLabel

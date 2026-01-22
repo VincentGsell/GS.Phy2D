@@ -4,11 +4,9 @@ interface
 
 uses
   System.SysUtils, System.Types, System.UITypes, System.Classes,
-  System.Diagnostics,
-  FMX.Types, FMX.Controls, FMX.Forms, FMX.Graphics, FMX.Dialogs, FMX.SpinBox,
-  FMX.Controls.Presentation, FMX.StdCtrls, FMX.Layouts,
-  GS.Phy.Vec2, GS.Phy.Types, GS.Phy.World,
-  GS.Phy.Renderer, GS.Phy.Renderer.FMX,
+  System.Diagnostics, FMX.Types, FMX.Controls, FMX.Forms, FMX.Graphics,
+  FMX.Dialogs, FMX.SpinBox, FMX.Controls.Presentation, FMX.StdCtrls, FMX.Layouts,
+  GS.Phy.Vec2, GS.Phy.Types, GS.Phy.World, GS.Phy.Renderer, GS.Phy.Renderer.FMX,
   FMX.Edit, FMX.EditBox, FMX.ActnList;
 
 type
@@ -32,6 +30,9 @@ type
     procedure TimerPhysicsTimer(Sender: TObject);
     procedure ButtonAddBallsClick(Sender: TObject);
     procedure ButtonAddBoxesClick(Sender: TObject);
+    procedure FormMouseDown(Sender: TObject; Button: TMouseButton; Shift: TShiftState; X, Y: Single);
+    procedure FormMouseMove(Sender: TObject; Shift: TShiftState; X, Y: Single);
+    procedure FormMouseUp(Sender: TObject; Button: TMouseButton; Shift: TShiftState; X, Y: Single);
     procedure SpinBoxIterationsChange(Sender: TObject);
     procedure TrackBarDampingChange(Sender: TObject);
     procedure TrackBarRestitutionChange(Sender: TObject);
@@ -43,6 +44,7 @@ type
     FFrameCount: Integer;
     FLastFPSUpdate: Int64;
     FBallCount: Integer;
+    FMouseBox: Integer;
     procedure CreateFrame;
     procedure UpdateFrame;
     procedure SpawnBalls(Count: Integer);
@@ -55,12 +57,15 @@ var
 
 implementation
 
+uses
+  System.Threading;
+
 {$R *.fmx}
 
 const
   WALL_THICKNESS = 20;
-  BALL_RADIUS_MIN = 5;
-  BALL_RADIUS_MAX = 15;
+  BALL_RADIUS_MIN = 2;
+  BALL_RADIUS_MAX = 2;
 
 procedure TFormGSPhy.FormCreate(Sender: TObject);
 begin
@@ -79,6 +84,21 @@ begin
   FStopwatch := TStopwatch.StartNew;
   FFrameCount := 0;
   FLastFPSUpdate := 0;
+
+  TTask.Run(
+    procedure
+    begin
+      while TTask.CurrentTask.Status in [TTaskStatus.Running] do
+      begin
+        //TMonitor.Enter(FWorld);
+        try
+          FWorld.Step(1.0 / 60.0);
+        finally
+          //TMonitor.Exit(FWorld);
+        end;
+        Sleep(10);
+      end;
+    end);
 end;
 
 procedure TFormGSPhy.FormDestroy(Sender: TObject);
@@ -102,13 +122,19 @@ begin
   W := ClientWidth;
   H := ClientHeight;
 
-  FWorld.Clear;
-  FBallCount := 0;
+  TMonitor.Enter(FWorld);
+  try
+    FWorld.Clear;
+    FBallCount := 0;
 
-  FWorld.SetWorldBounds(W, H);
-  FFrameCreated := True;
+    FWorld.SetWorldBounds(W, H);
+    FFrameCreated := True;
 
-  LabelBallCount.Text := 'Balls: 0';
+    LabelBallCount.Text := 'Balls: 0';
+    FMouseBox := FWorld.AddBox(200, 200, 40, 40);
+  finally
+    TMonitor.Exit(FWorld);
+  end;
 end;
 
 procedure TFormGSPhy.UpdateFrame;
@@ -117,7 +143,12 @@ var
 begin
   W := ClientWidth;
   H := ClientHeight;
-  FWorld.SetWorldBounds(W, H);
+  TMonitor.Enter(FWorld);
+  try
+    FWorld.SetWorldBounds(W, H);
+  finally
+    TMonitor.Exit(FWorld);
+  end;
 end;
 
 procedure TFormGSPhy.SpawnBalls(Count: Integer);
@@ -176,7 +207,7 @@ begin
   TimerPhysics.Enabled := False;
   try
     //forward !
-    FWorld.Step(1.0 / 60.0);
+    //FWorld.Step(1.0 / 60.0);
 
     //FPS
     Inc(FFrameCount);
@@ -204,6 +235,42 @@ begin
   SpawnBoxes(50);
 end;
 
+procedure TFormGSPhy.FormMouseDown(Sender: TObject; Button: TMouseButton; Shift: TShiftState; X, Y: Single);
+begin
+  var Box := FWorld.GetBox(FMouseBox);
+  Box^.MinX := X - 40 * 0.5;
+  Box^.MaxX := X + 40 * 0.5;
+  Box^.MinY := Y - 40 * 0.5;
+  Box^.MaxY := Y + 40 * 0.5;
+  FWorld.Boxes[FMouseBox] := Box^;
+  FWorld.NeedRebuildBoxGrid;
+end;
+
+procedure TFormGSPhy.FormMouseMove(Sender: TObject; Shift: TShiftState; X, Y: Single);
+begin
+  if ssLeft in Shift then
+  begin
+    var Box := FWorld.GetBox(FMouseBox);
+    Box^.MinX := X - 40 * 0.5;
+    Box^.MaxX := X + 40 * 0.5;
+    Box^.MinY := Y - 40 * 0.5;
+    Box^.MaxY := Y + 40 * 0.5;
+    FWorld.Boxes[FMouseBox] := Box^;
+    FWorld.NeedRebuildBoxGrid;
+  end;
+end;
+
+procedure TFormGSPhy.FormMouseUp(Sender: TObject; Button: TMouseButton; Shift: TShiftState; X, Y: Single);
+begin
+  var Box := FWorld.GetBox(FMouseBox);
+  Box^.MinX := -40 - 40 * 0.5;
+  Box^.MaxX := -40 + 40 * 0.5;
+  Box^.MinY := -40 - 40 * 0.5;
+  Box^.MaxY := -40 + 40 * 0.5;
+  FWorld.Boxes[FMouseBox] := Box^;
+  FWorld.NeedRebuildBoxGrid;
+end;
+
 procedure TFormGSPhy.SpinBoxIterationsChange(Sender: TObject);
 begin
   FWorld.CollisionIterations := Trunc(SpinBoxIterations.Value);
@@ -228,8 +295,7 @@ begin
   LabelRestitution.Text := Format('Rest: %d%%', [Trunc(TrackBarRestitution.Value)]);
 end;
 
-procedure TFormGSPhy.FormPaint(Sender: TObject; Canvas: TCanvas;
-  const ARect: TRectF);
+procedure TFormGSPhy.FormPaint(Sender: TObject; Canvas: TCanvas; const ARect: TRectF);
 begin
   FRenderer.SetCanvas(Canvas);
   FRenderer.SetSize(ClientWidth, ClientHeight);
@@ -261,30 +327,36 @@ begin
   FRenderer.FillRect(W - 2, 0, W, H, TPhyColors.LightGray);
 
   // Boxes statiques
-  for I := 0 to FWorld.BoxCount - 1 do
-  begin
-    Box := FWorld.GetBox(I);
-    FRenderer.FillRect(Box^.MinX, Box^.MinY, Box^.MaxX, Box^.MaxY, TPhyColors.Gray);
-  end;
+  //TMonitor.Enter(FWorld);
+  try
+    for I := 0 to FWorld.BoxCount - 1 do
+    begin
+      Box := FWorld.GetBox(I);
+      FRenderer.FillRect(Box^.MinX, Box^.MinY, Box^.MaxX, Box^.MaxY, TPhyColors.Gray);
+    end;
 
-  // Particules avec couleur selon velocite
-  for I := 0 to FWorld.ParticleCount - 1 do
-  begin
-    PosX := FWorld.GetPosX(I);
-    PosY := FWorld.GetPosY(I);
-    OldPosX := FWorld.GetOldPosX(I);
-    OldPosY := FWorld.GetOldPosY(I);
-    Radius := FWorld.GetRadius(I);
+    // Particules avec couleur selon velocite
+    for I := 0 to FWorld.ParticleCount - 1 do
+    begin
+      PosX := FWorld.GetPosX(I);
+      PosY := FWorld.GetPosY(I);
+      OldPosX := FWorld.GetOldPosX(I);
+      OldPosY := FWorld.GetOldPosY(I);
+      Radius := FWorld.GetRadius(I);
 
-    // Velocite Verlet: V = Pos - OldPos
-    VelX := PosX - OldPosX;
-    VelY := PosY - OldPosY;
+      // Velocite Verlet: V = Pos - OldPos
+      VelX := PosX - OldPosX;
+      VelY := PosY - OldPosY;
+                                        // TAlphaColors.Darkseagreen;//
+      ParticleColor :=   FRenderer.VelocityToColor(VelX, VelY);
 
-    ParticleColor := FRenderer.VelocityToColor(VelX, VelY);
-
-    FRenderer.FillCircle(PosX, PosY, Radius, ParticleColor);
-    //FRenderer.DrawCircle(PosX, PosY, Radius, TPhyColors.Black, 2.0);
+      FRenderer.FillCircle(PosX, PosY, Radius * 3, ParticleColor);
+      //FRenderer.DrawCircle(PosX, PosY, Radius, TPhyColors.Black, 2.0);
+    end;
+  finally
+    //TMonitor.Exit(FWorld);
   end;
 end;
 
 end.
+
