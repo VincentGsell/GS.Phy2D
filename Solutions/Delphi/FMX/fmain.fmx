@@ -1,0 +1,135 @@
+object FormGSPhy: TFormGSPhy
+  Left = 0
+  Top = 0
+  Caption = 'GSPhy2D Demo'
+  ClientHeight = 639
+  ClientWidth = 1152
+  FormFactor.Width = 320
+  FormFactor.Height = 480
+  FormFactor.Devices = [Desktop]
+  OnCreate = FormCreate
+  OnDestroy = FormDestroy
+  OnResize = FormResize
+  OnPaint = FormPaint
+  DesignerMasterStyle = 0
+  object TimerPhysics: TTimer
+    Interval = 16
+    OnTimer = TimerPhysicsTimer
+    Left = 32
+    Top = 80
+  end
+  object PanelControls: TPanel
+    Position.X = 8.000000000000000000
+    Position.Y = 8.000000000000000000
+    Size.Width = 753.000000000000000000
+    Size.Height = 40.000000000000000000
+    Size.PlatformDefault = False
+    TabOrder = 0
+    object ButtonAddBalls: TButton
+      Position.X = 8.000000000000000000
+      Position.Y = 8.000000000000000000
+      Size.Width = 90.000000000000000000
+      Size.Height = 24.000000000000000000
+      Size.PlatformDefault = False
+      TabOrder = 0
+      Text = 'Add 50 Balls'
+      TextSettings.Trimming = None
+      OnClick = ButtonAddBallsClick
+    end
+    object ButtonAddBoxes: TButton
+      Position.X = 104.000000000000000000
+      Position.Y = 8.000000000000000000
+      Size.Width = 90.000000000000000000
+      Size.Height = 24.000000000000000000
+      Size.PlatformDefault = False
+      TabOrder = 1
+      Text = 'Add 50 Boxes'
+      TextSettings.Trimming = None
+      OnClick = ButtonAddBoxesClick
+    end
+    object LabelBallCount: TLabel
+      Position.X = 200.000000000000000000
+      Position.Y = 8.000000000000000000
+      Size.Width = 70.000000000000000000
+      Size.Height = 24.000000000000000000
+      Size.PlatformDefault = False
+      Text = 'Balls: 0'
+      TabOrder = 2
+    end
+    object LabelFPS: TLabel
+      Position.X = 264.000000000000000000
+      Position.Y = 8.000000000000000000
+      Size.Width = 70.000000000000000000
+      Size.Height = 24.000000000000000000
+      Size.PlatformDefault = False
+      Text = 'FPS: 0'
+      TabOrder = 3
+    end
+    object LabelIterations: TLabel
+      Position.X = 320.000000000000000000
+      Position.Y = 8.000000000000000000
+      Size.Width = 48.000000000000000000
+      Size.Height = 24.000000000000000000
+      Size.PlatformDefault = False
+      Text = 'Iter: 2'
+      TabOrder = 4
+    end
+    object SpinBoxIterations: TSpinBox
+      Touch.InteractiveGestures = [LongTap, DoubleTap]
+      TabOrder = 5
+      Cursor = crIBeam
+      Min = 1.000000000000000000
+      Max = 10.000000000000000000
+      Value = 2.000000000000000000
+      Position.X = 368.000000000000000000
+      Position.Y = 8.000000000000000000
+      Size.Width = 44.000000000000000000
+      Size.Height = 24.000000000000000000
+      Size.PlatformDefault = False
+      OnChange = SpinBoxIterationsChange
+    end
+    object LabelDamping: TLabel
+      Position.X = 443.000000000000000000
+      Position.Y = 8.000000000000000000
+      Size.Width = 60.000000000000000000
+      Size.Height = 24.000000000000000000
+      Size.PlatformDefault = False
+      Text = 'Damp: 99%'
+      TabOrder = 6
+    end
+    object TrackBarDamping: TTrackBar
+      CanParentFocus = True
+      Min = 80.000000000000000000
+      Orientation = Horizontal
+      Position.X = 519.000000000000000000
+      Position.Y = 8.000000000000000000
+      Size.Width = 80.000000000000000000
+      Size.Height = 19.000000000000000000
+      Size.PlatformDefault = False
+      TabOrder = 7
+      Value = 99.000000000000000000
+      OnChange = TrackBarDampingChange
+    end
+    object LabelRestitution: TLabel
+      Position.X = 607.000000000000000000
+      Position.Y = 8.000000000000000000
+      Size.Width = 60.000000000000000000
+      Size.Height = 24.000000000000000000
+      Size.PlatformDefault = False
+      Text = 'Rest: 30%'
+      TabOrder = 8
+    end
+    object TrackBarRestitution: TTrackBar
+      CanParentFocus = True
+      Orientation = Horizontal
+      Position.X = 675.000000000000000000
+      Position.Y = 8.000000000000000000
+      Size.Width = 70.000000000000000000
+      Size.Height = 19.000000000000000000
+      Size.PlatformDefault = False
+      TabOrder = 9
+      Value = 30.000000000000000000
+      OnChange = TrackBarRestitutionChange
+    end
+  end
+end
