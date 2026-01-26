@@ -1,7 +1,16 @@
 # GS.Phy2D
 
-Since APE repo, I'll trying to work on a more optimized 2d physics stuff, here is the WIP result.
+Since [APE](https://github.com/VincentGsell/APE) repo, I'll trying to work on a more optimized 2d physics stuff, here is the WIP result.
 -> Architecture work + code layout to make it run quite fast (spatial hashes, records, pointers lists and so on.)
+
+I wrote the Pascal version in a pretty chill way, really from start to finish, taking inspiration from [APE](https://github.com/VincentGsell/APE) of course, 
+but also from the work done on the [2D constraint project](https://github.com/VincentGsell/2d-Constraints-Demos)  (also written in a relaxed style 🙂).
+
+While writing the spatial hash, I did a lot of research and, with help from AI (Claude), that turned out to be a key factor in several parts of the code.
+
+I also started a Rust course a few months ago, which I find quite fascinating. So I began translating the Pascal project into Rust — heavily assisted by AI at first, but less and less over time 🙂
+
+So there’s some documentation (AI-assisted, but reviewed and overseen by me) that includes a small comparative analysis.
 
 ## History : 
 
