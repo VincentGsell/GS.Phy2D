@@ -5,6 +5,11 @@ Since APE repo, I'll trying to work on a more optimized 2d physics stuff, here i
 
 ## History : 
 
+2026-01-26 - Rust version - Docs.
+
+![Alt text](/assets/rust-gsPhy2D-1.png "rustImage1")
+![Alt text](/assets/rust-gsPhy2D-2.png "rustImage2")
+
 2026-01-21 - Compound constraint.
 
 ![Alt text](/assets/gsPhy2DDemo1CompoundConstraint.png "Compound")
