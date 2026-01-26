@@ -1,0 +1,72 @@
+# =============================================================================
+# Cargo.toml - Configuration du projet GS.Phy2D porté en Rust
+# =============================================================================
+#
+# GS.Phy2D est un moteur physique 2D utilisant :
+# - Intégration Verlet (stable, pas de vélocité explicite)
+# - Structure SoA (Structure of Arrays) pour les performances cache
+# - Spatial Hash pour les collisions O(n)
+# - FastInvSqrt (algorithme Quake III) pour les normalisations
+#
+# Commandes :
+#   cargo build --release    # Compiler en mode optimisé
+#   cargo run --release      # Lancer la démo
+#   cargo test               # Exécuter les tests unitaires
+#   cargo doc --open         # Générer et ouvrir la documentation
+#
+# =============================================================================
+
+[package]
+name = "gs-phy2d"
+version = "0.1.0"
+edition = "2021"
+description = "GS.Phy2D - Moteur physique 2D haute performance (portage Rust)"
+authors = ["Vincent Gsell"]
+license = "LGPL-2.1"
+repository = "https://github.com/VincentGsell/GS.Phy2D"
+
+# =============================================================================
+# Configuration de la bibliothèque
+# =============================================================================
+# On crée à la fois une bibliothèque (lib) et un exécutable (bin).
+# La bibliothèque peut être utilisée par d'autres projets Rust.
+
+[lib]
+name = "gs_phy2d"
+path = "src/lib.rs"
+
+[[bin]]
+name = "gs_phy2d_demo"
+path = "src/bin/gs_phy2d_demo.rs"
+
+# =============================================================================
+# Dépendances
+# =============================================================================
+
+[dependencies]
+# macroquad : Bibliothèque graphique simple pour le rendu 2D
+# - API intuitive inspirée de raylib
+# - Gère fenêtre, entrées, et rendu
+macroquad = "0.4"
+
+# rand : Génération de nombres aléatoires
+# - Pour les couleurs et positions aléatoires des particules
+rand = "0.8"
+
+# =============================================================================
+# Optimisations pour le mode release
+# =============================================================================
+
+[profile.release]
+# Niveau d'optimisation maximal (3 = agressif)
+opt-level = 3
+
+# LTO (Link-Time Optimization) : optimisation à l'édition de liens
+# "fat" = optimisation maximale mais compilation plus lente
+lto = "fat"
+
+# Nombre d'unités de compilation (1 = meilleure optimisation)
+codegen-units = 1
+
+# Désactive les vérifications de panic (plus rapide mais moins sûr)
+panic = "abort"
