@@ -79,7 +79,28 @@ modules/
 *.xml
 *.dex
 
-#AI
+# AI
 CLAUDE.MD
 IDEAS.MD
 .claude
+
+#
+# Rust
+#
+# Rust's Cargo generated file
+target/
+Cargo.lock
+
+# rust-analyzer and tools dependancy mess.
+*.d
+
+# binaries and cache
+**/*.rs.bk
+**/*.swp
+**/*.swo
+
+# IDE stuffs
+.idea/
+.vscode/
+*.swp
+*.swo
